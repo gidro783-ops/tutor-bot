@@ -1,10 +1,12 @@
 import asyncio
 import logging
+import os
 import sys
 
+from aiohttp import web
 from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
 from config import config
 from database import db
@@ -24,87 +26,113 @@ from handlers import (
 )
 
 
-async def on_startup(bot: Bot):
-    """Действия при запуске бота."""
-    await db.connect()
-    logging.info("✅ База данных подключена")
+async def healthcheck(request):
+    return web.Response(text="OK")
 
-    # Уведомляем админов
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", healthcheck)
+    app.router.add_get("/health", healthcheck)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    port = int(os.getenv("PORT", "8080"))
+    site = web.TCPSite(runner, host="0.0.0.0", port=port)
+    await site.start()
+
+    logging.info(f"✅ Health server started on port {port}")
+    return runner
+
+
+async def notify_admins(bot: Bot, text: str):
     for admin_id in config.ADMIN_IDS:
         try:
-            await bot.send_message(
-                admin_id,
-                "🟢 Бот запущен и готов к работе!\n"
-                "Используйте /admin для входа в панель управления."
-            )
-        except Exception:
-            pass
-
-    logging.info("✅ Бот запущен")
-
-
-async def on_shutdown(bot: Bot):
-    """Действия при остановке бота."""
-    await db.close()
-    logging.info("🔴 Бот остановлен")
-
-    for admin_id in config.ADMIN_IDS:
-        try:
-            await bot.send_message(admin_id, "🔴 Бот остановлен.")
+            await bot.send_message(admin_id, text)
         except Exception:
             pass
 
 
 async def main():
-    # Настройка логирования
     logging.basicConfig(
-        level=logging.WARNING,
+        level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         stream=sys.stdout
     )
 
-    # Создаём бота
+    await db.connect()
+    logging.info("✅ База данных подключена")
+
     bot = Bot(
         token=config.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
 
-    # Создаём диспетчер
     dp = Dispatcher()
 
-    # Регистрируем мидлвары
     dp.message.middleware(ActivityMiddleware())
     dp.message.middleware(DndMiddleware())
 
-    # Регистрируем роутеры (порядок важен!)
-    dp.include_router(admin_router)      # Админ — первым
-    dp.include_router(booking_router)    # Запись
-    dp.include_router(homework_router)   # ДЗ
-    dp.include_router(payments_router)   # Оплаты
-    dp.include_router(reviews_router)    # Отзывы
-    dp.include_router(analytics_router)  # Аналитика
-    dp.include_router(mailing_router)    # Рассылки
-    dp.include_router(referral_router)   # Рефералы
-    dp.include_router(student_router)    # Студент — последним (catch-all)
+    dp.include_router(admin_router)
+    dp.include_router(booking_router)
+    dp.include_router(homework_router)
+    dp.include_router(payments_router)
+    dp.include_router(reviews_router)
+    dp.include_router(analytics_router)
+    dp.include_router(mailing_router)
+    dp.include_router(referral_router)
+    dp.include_router(student_router)
 
-    # Регистрируем хуки
-    dp.startup.register(on_startup)
-    dp.shutdown.register(on_shutdown)
-
-    # Запускаем планировщик задач
     scheduler = BotScheduler(bot)
-    scheduler.start()
+    web_runner = None
 
     try:
-        # Запускаем бота
+        web_runner = await start_web_server()
+        scheduler.start()
+
+        await notify_admins(
+            bot,
+            "🟢 Бот запущен на Railway и готов к работе!"
+        )
+
+        logging.info("✅ Бот запущен")
         await dp.start_polling(
             bot,
             allowed_updates=dp.resolve_used_update_types(),
             drop_pending_updates=True
         )
+
+    except Exception as e:
+        logging.exception(f"❌ Критическая ошибка: {e}")
+        raise
+
     finally:
-        scheduler.stop()
-        await bot.session.close()
+        try:
+            scheduler.stop()
+        except Exception:
+            pass
+
+        try:
+            await notify_admins(bot, "🔴 Бот остановлен.")
+        except Exception:
+            pass
+
+        try:
+            if web_runner:
+                await web_runner.cleanup()
+        except Exception:
+            pass
+
+        try:
+            await db.close()
+        except Exception:
+            pass
+
+        try:
+            await bot.session.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
