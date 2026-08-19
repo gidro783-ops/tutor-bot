@@ -2,12 +2,20 @@ import aiosqlite
 import json
 from datetime import datetime, date, timedelta
 from typing import Optional
-from config import config
+import os
 
 
 class Database:
-    def __init__(self, db_path: str = None):
-        self.db_path = db_path or config.DATABASE_PATH
+    def __init__(self):
+        # Берём путь из переменной окружения или используем дефолтный
+        db_path = os.getenv("DATABASE_PATH", "data/tutor_bot.db")
+        
+        # Создаём папку если её нет
+        db_dir = os.path.dirname(db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+        
+        self.db_path = db_path
         self.db: Optional[aiosqlite.Connection] = None
 
     async def connect(self):
@@ -207,7 +215,8 @@ class Database:
                 day_of_week INTEGER,
                 start_time TEXT NOT NULL,
                 end_time TEXT NOT NULL,
-                auto_reply_text TEXT DEFAULT 'Сейчас идёт занятие. Я отвечу вам позже!'
+                auto_reply_text TEXT DEFAULT
+                    'Сейчас идёт занятие. Я отвечу вам позже!'
             );
         """)
         await self.db.commit()
@@ -216,7 +225,8 @@ class Database:
 
     async def add_student(self, user_id: int, full_name: str,
                           username: str = None, phone: str = None,
-                          source: str = "direct", source_chat_id: int = None,
+                          source: str = "direct",
+                          source_chat_id: int = None,
                           referrer_id: int = None) -> bool:
         try:
             await self.db.execute(
@@ -283,7 +293,9 @@ class Database:
         try:
             if not kwargs:
                 return
-            set_clause = ", ".join(f"{k} = ?" for k in kwargs.keys())
+            set_clause = ", ".join(
+                f"{k} = ?" for k in kwargs.keys()
+            )
             values = list(kwargs.values()) + [user_id]
             await self.db.execute(
                 f"UPDATE students SET {set_clause} WHERE user_id = ?",
@@ -318,7 +330,9 @@ class Database:
 
     async def authenticate_admin(self, admin_id: int, hours: int = 12):
         try:
-            expires = (datetime.now() + timedelta(hours=hours)).isoformat()
+            expires = (
+                datetime.now() + timedelta(hours=hours)
+            ).isoformat()
             await self.db.execute(
                 """INSERT OR REPLACE INTO admin_sessions
                    (admin_id, is_authenticated, auth_time, session_expires)
@@ -346,7 +360,8 @@ class Database:
                           description: str = "") -> int:
         try:
             cursor = await self.db.execute(
-                """INSERT INTO subjects (name, price_per_hour, description)
+                """INSERT INTO subjects
+                   (name, price_per_hour, description)
                    VALUES (?, ?, ?)""",
                 (name, price, description)
             )
@@ -411,8 +426,10 @@ class Database:
         try:
             if not from_date:
                 from_date = date.today().isoformat()
-            to_date = (date.fromisoformat(from_date) +
-                       timedelta(days=days_ahead)).isoformat()
+            to_date = (
+                date.fromisoformat(from_date) +
+                timedelta(days=days_ahead)
+            ).isoformat()
             cursor = await self.db.execute(
                 """SELECT * FROM time_slots
                    WHERE is_available = 1
@@ -475,7 +492,8 @@ class Database:
         try:
             cursor = await self.db.execute(
                 """INSERT INTO bookings
-                   (student_id, slot_id, subject_id, booking_type, status)
+                   (student_id, slot_id, subject_id,
+                    booking_type, status)
                    VALUES (?, ?, ?, ?, 'confirmed')""",
                 (student_id, slot_id, subject_id, booking_type)
             )
@@ -541,17 +559,20 @@ class Database:
         except Exception:
             return []
 
-    async def get_upcoming_bookings(self, minutes_ahead: int = 60) -> list:
+    async def get_upcoming_bookings(self,
+                                    minutes_ahead: int = 60) -> list:
         try:
             now = datetime.now()
             today = now.date().isoformat()
             current_time = now.strftime("%H:%M")
-            ahead_time = (now + timedelta(minutes=minutes_ahead)
-                          ).strftime("%H:%M")
+            ahead_time = (
+                now + timedelta(minutes=minutes_ahead)
+            ).strftime("%H:%M")
             cursor = await self.db.execute(
                 """SELECT b.*, ts.date, ts.start_time, ts.end_time,
                           s.name as subject_name,
-                          st.full_name, st.user_id as student_user_id
+                          st.full_name,
+                          st.user_id as student_user_id
                    FROM bookings b
                    LEFT JOIN time_slots ts ON b.slot_id = ts.id
                    LEFT JOIN subjects s ON b.subject_id = s.id
@@ -583,7 +604,8 @@ class Database:
             if booking:
                 await self.db.execute(
                     """UPDATE bookings SET status = 'cancelled',
-                       cancelled_at = datetime('now'), cancel_reason = ?
+                       cancelled_at = datetime('now'),
+                       cancel_reason = ?
                        WHERE id = ?""",
                     (reason, booking_id)
                 )
@@ -595,7 +617,8 @@ class Database:
     async def complete_booking(self, booking_id: int):
         try:
             await self.db.execute(
-                "UPDATE bookings SET status = 'completed' WHERE id = ?",
+                """UPDATE bookings SET status = 'completed'
+                   WHERE id = ?""",
                 (booking_id,)
             )
             await self.db.commit()
@@ -605,7 +628,8 @@ class Database:
     # =================== ДОМАШНИЕ ЗАДАНИЯ ===================
 
     async def add_homework(self, student_id: int, title: str,
-                           description: str = "", subject_id: int = None,
+                           description: str = "",
+                           subject_id: int = None,
                            due_date: str = None,
                            file_ids: list = None) -> int:
         try:
@@ -640,7 +664,9 @@ class Database:
             for r in rows:
                 d = dict(r)
                 try:
-                    d["file_ids"] = json.loads(d.get("file_ids", "[]"))
+                    d["file_ids"] = json.loads(
+                        d.get("file_ids", "[]")
+                    )
                 except Exception:
                     d["file_ids"] = []
                 try:
@@ -654,7 +680,8 @@ class Database:
         except Exception:
             return []
 
-    async def submit_homework(self, hw_id: int, file_ids: list = None):
+    async def submit_homework(self, hw_id: int,
+                              file_ids: list = None):
         try:
             await self.db.execute(
                 """UPDATE homework SET status = 'submitted',
@@ -686,7 +713,8 @@ class Database:
                              description: str = "") -> int:
         try:
             cursor = await self.db.execute(
-                """INSERT INTO payments (student_id, amount, description)
+                """INSERT INTO payments
+                   (student_id, amount, description)
                    VALUES (?, ?, ?)""",
                 (student_id, amount, description)
             )
@@ -700,7 +728,8 @@ class Database:
         try:
             query = """SELECT p.*, st.full_name, st.username
                        FROM payments p
-                       LEFT JOIN students st ON p.student_id = st.user_id
+                       LEFT JOIN students st
+                           ON p.student_id = st.user_id
                        WHERE p.status = 'pending'"""
             params = []
             if student_id:
@@ -718,7 +747,8 @@ class Database:
         try:
             await self.db.execute(
                 """UPDATE payments SET status = 'paid',
-                   paid_at = datetime('now'), payment_method = ?
+                   paid_at = datetime('now'),
+                   payment_method = ?
                    WHERE id = ?""",
                 (method, payment_id)
             )
@@ -731,13 +761,14 @@ class Database:
             cursor = await self.db.execute(
                 """SELECT
                     COUNT(*) as total_payments,
-                    SUM(CASE WHEN status='paid' THEN amount ELSE 0 END)
-                        as total_paid,
-                    SUM(CASE WHEN status='pending' THEN amount ELSE 0 END)
-                        as total_pending,
-                    COUNT(CASE WHEN status='paid' THEN 1 END) as paid_count,
-                    COUNT(CASE WHEN status='pending' THEN 1 END)
-                        as pending_count
+                    SUM(CASE WHEN status='paid'
+                        THEN amount ELSE 0 END) as total_paid,
+                    SUM(CASE WHEN status='pending'
+                        THEN amount ELSE 0 END) as total_pending,
+                    COUNT(CASE WHEN status='paid'
+                        THEN 1 END) as paid_count,
+                    COUNT(CASE WHEN status='pending'
+                        THEN 1 END) as pending_count
                    FROM payments
                    WHERE created_at >= datetime('now', ?)""",
                 (f"-{period_days} days",)
@@ -764,10 +795,12 @@ class Database:
         except Exception:
             return 0
 
-    async def get_reviews(self, published_only: bool = False) -> list:
+    async def get_reviews(self,
+                          published_only: bool = False) -> list:
         try:
             query = """SELECT r.*, st.full_name FROM reviews r
-                       LEFT JOIN students st ON r.student_id = st.user_id"""
+                       LEFT JOIN students st
+                           ON r.student_id = st.user_id"""
             if published_only:
                 query += " WHERE r.is_published = 1"
             query += " ORDER BY r.created_at DESC"
@@ -816,14 +849,17 @@ class Database:
     async def get_all_faq(self) -> list:
         try:
             cursor = await self.db.execute(
-                "SELECT * FROM faq WHERE is_active = 1 ORDER BY order_num"
+                """SELECT * FROM faq WHERE is_active = 1
+                   ORDER BY order_num"""
             )
             rows = await cursor.fetchall()
             result = []
             for r in rows:
                 d = dict(r)
                 try:
-                    d["keywords"] = json.loads(d.get("keywords", "[]"))
+                    d["keywords"] = json.loads(
+                        d.get("keywords", "[]")
+                    )
                 except Exception:
                     d["keywords"] = []
                 result.append(d)
@@ -831,7 +867,8 @@ class Database:
         except Exception:
             return []
 
-    async def find_faq_answer(self, text: str) -> Optional[dict]:
+    async def find_faq_answer(self,
+                              text: str) -> Optional[dict]:
         try:
             faqs = await self.get_all_faq()
             text_lower = text.lower()
@@ -847,7 +884,8 @@ class Database:
     async def delete_faq(self, faq_id: int):
         try:
             await self.db.execute(
-                "UPDATE faq SET is_active = 0 WHERE id = ?", (faq_id,)
+                "UPDATE faq SET is_active = 0 WHERE id = ?",
+                (faq_id,)
             )
             await self.db.commit()
         except Exception:
@@ -855,10 +893,12 @@ class Database:
 
     # =================== ЧАТЫ ===================
 
-    async def add_ad_chat(self, chat_id: int, chat_title: str = ""):
+    async def add_ad_chat(self, chat_id: int,
+                          chat_title: str = ""):
         try:
             await self.db.execute(
-                """INSERT OR IGNORE INTO ad_chats (chat_id, chat_title)
+                """INSERT OR IGNORE INTO ad_chats
+                   (chat_id, chat_title)
                    VALUES (?, ?)""",
                 (chat_id, chat_title)
             )
@@ -866,7 +906,8 @@ class Database:
         except Exception:
             pass
 
-    async def get_ad_chats(self, active_only: bool = True) -> list:
+    async def get_ad_chats(self,
+                           active_only: bool = True) -> list:
         try:
             query = "SELECT * FROM ad_chats"
             if active_only:
@@ -944,12 +985,13 @@ class Database:
         except Exception:
             pass
 
-    async def get_referral_stats(self, referrer_id: int) -> dict:
+    async def get_referral_stats(self,
+                                 referrer_id: int) -> dict:
         try:
             cursor = await self.db.execute(
                 """SELECT COUNT(*) as total_referrals,
-                          COUNT(CASE WHEN status='completed' THEN 1 END)
-                              as completed
+                          COUNT(CASE WHEN status='completed'
+                              THEN 1 END) as completed
                    FROM referrals WHERE referrer_id = ?""",
                 (referrer_id,)
             )
@@ -962,14 +1004,16 @@ class Database:
 
     # =================== ВОРОНКА ===================
 
-    async def log_funnel_event(self, user_id: int, event_type: str,
+    async def log_funnel_event(self, user_id: int,
+                               event_type: str,
                                source: str = None,
                                source_chat_id: int = None,
                                metadata: dict = None):
         try:
             await self.db.execute(
                 """INSERT INTO funnel_events
-                   (user_id, event_type, source, source_chat_id, metadata)
+                   (user_id, event_type, source,
+                    source_chat_id, metadata)
                    VALUES (?, ?, ?, ?, ?)""",
                 (user_id, event_type, source, source_chat_id,
                  json.dumps(metadata or {}))
@@ -978,10 +1022,13 @@ class Database:
         except Exception:
             pass
 
-    async def get_funnel_stats(self, period_days: int = 30) -> dict:
+    async def get_funnel_stats(self,
+                               period_days: int = 30) -> dict:
         try:
-            events = ["ad_seen", "bot_started", "trial_booked",
-                      "trial_attended", "became_regular"]
+            events = [
+                "ad_seen", "bot_started", "trial_booked",
+                "trial_attended", "became_regular"
+            ]
             stats = {}
             for event in events:
                 cursor = await self.db.execute(
@@ -1000,7 +1047,8 @@ class Database:
     async def get_chat_performance(self) -> list:
         try:
             cursor = await self.db.execute(
-                """SELECT ac.chat_id, ac.chat_title, ac.total_leads,
+                """SELECT ac.chat_id, ac.chat_title,
+                          ac.total_leads,
                           COUNT(DISTINCT fe.user_id) as unique_users
                    FROM ad_chats ac
                    LEFT JOIN funnel_events fe
@@ -1016,10 +1064,12 @@ class Database:
 
     # =================== НАСТРОЙКИ ===================
 
-    async def get_setting(self, key: str, default: str = "") -> str:
+    async def get_setting(self, key: str,
+                          default: str = "") -> str:
         try:
             cursor = await self.db.execute(
-                "SELECT value FROM bot_settings WHERE key = ?", (key,)
+                "SELECT value FROM bot_settings WHERE key = ?",
+                (key,)
             )
             row = await cursor.fetchone()
             return row["value"] if row else default
@@ -1040,24 +1090,19 @@ class Database:
 
     # =================== DND ===================
 
-    async def get_dnd_schedules(self) -> list:
-        try:
-            cursor = await self.db.execute("SELECT * FROM dnd_schedule")
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
-        except Exception:
-            return []
-
-    async def add_dnd_schedule(self, start_time: str, end_time: str,
+    async def add_dnd_schedule(self, start_time: str,
+                               end_time: str,
                                day_of_week: int = None,
                                auto_reply: str = None):
         try:
             await self.db.execute(
                 """INSERT INTO dnd_schedule
-                   (day_of_week, start_time, end_time, auto_reply_text)
+                   (day_of_week, start_time, end_time,
+                    auto_reply_text)
                    VALUES (?, ?, ?, ?)""",
                 (day_of_week, start_time, end_time,
-                 auto_reply or "Сейчас идёт занятие. Отвечу позже!")
+                 auto_reply or
+                 "Сейчас идёт занятие. Отвечу позже!")
             )
             await self.db.commit()
         except Exception:
@@ -1090,7 +1135,8 @@ class Database:
 
     # =================== A/B ТЕСТЫ ===================
 
-    async def create_ab_test(self, name: str, variant_a: str,
+    async def create_ab_test(self, name: str,
+                             variant_a: str,
                              variant_b: str) -> int:
         try:
             cursor = await self.db.execute(
@@ -1114,12 +1160,15 @@ class Database:
         except Exception:
             return []
 
-    async def increment_ab_stat(self, test_id: int, variant: str,
+    async def increment_ab_stat(self, test_id: int,
+                                variant: str,
                                 stat: str = "sends"):
         try:
             col = f"variant_{variant.lower()}_{stat}"
             await self.db.execute(
-                f"UPDATE ab_tests SET {col} = {col} + 1 WHERE id = ?",
+                f"""UPDATE ab_tests
+                    SET {col} = {col} + 1
+                    WHERE id = ?""",
                 (test_id,)
             )
             await self.db.commit()
@@ -1132,7 +1181,8 @@ class Database:
                          details: dict = None):
         try:
             await self.db.execute(
-                """INSERT INTO action_logs (user_id, action, details)
+                """INSERT INTO action_logs
+                   (user_id, action, details)
                    VALUES (?, ?, ?)""",
                 (user_id, action, json.dumps(details or {}))
             )
@@ -1156,14 +1206,16 @@ class Database:
         }
         try:
             cursor = await self.db.execute(
-                "SELECT COUNT(*) as c FROM students WHERE is_active = 1"
+                """SELECT COUNT(*) as c FROM students
+                   WHERE is_active = 1"""
             )
             row = await cursor.fetchone()
             stats["total_students"] = row["c"] if row else 0
 
             cursor = await self.db.execute(
                 """SELECT COUNT(*) as c FROM students
-                   WHERE registration_date >= datetime('now', '-30 days')"""
+                   WHERE registration_date >=
+                       datetime('now', '-30 days')"""
             )
             row = await cursor.fetchone()
             stats["new_students_month"] = row["c"] if row else 0
@@ -1172,7 +1224,8 @@ class Database:
             cursor = await self.db.execute(
                 """SELECT COUNT(*) as c FROM bookings b
                    LEFT JOIN time_slots ts ON b.slot_id = ts.id
-                   WHERE ts.date = ? AND b.status = 'confirmed'""",
+                   WHERE ts.date = ?
+                   AND b.status = 'confirmed'""",
                 (today,)
             )
             row = await cursor.fetchone()
@@ -1188,10 +1241,10 @@ class Database:
 
             cursor = await self.db.execute(
                 """SELECT
-                    COUNT(CASE WHEN booking_type='trial' THEN 1 END)
-                        as trials,
-                    COUNT(CASE WHEN booking_type='regular' THEN 1 END)
-                        as regulars
+                    COUNT(CASE WHEN booking_type='trial'
+                        THEN 1 END) as trials,
+                    COUNT(CASE WHEN booking_type='regular'
+                        THEN 1 END) as regulars
                    FROM bookings
                    WHERE created_at >= datetime('now', '-30 days')
                    AND status != 'cancelled'"""
@@ -1201,7 +1254,8 @@ class Database:
                 trials = row["trials"] or 0
                 regulars = row["regulars"] or 0
                 stats["trial_conversion"] = (
-                    round(regulars / trials * 100, 1) if trials > 0 else 0
+                    round(regulars / trials * 100, 1)
+                    if trials > 0 else 0
                 )
 
             stats["avg_rating"] = await self.get_average_rating()
@@ -1221,4 +1275,5 @@ class Database:
         return stats
 
 
+# Глобальный экземпляр
 db = Database()
