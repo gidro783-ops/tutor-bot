@@ -827,7 +827,7 @@ async def admin_settings(callback: CallbackQuery):
         "⚙️ <b>Настройки</b>\n\n"
         f"🌍 Таймзона: {config.TIMEZONE}\n"
         f"🔕 DND: {config.DND_START}—{config.DND_END}\n"
-        f"🔔 Напоминания: за {', '.join(str(m) + ' мин' for< + ' мин' for m in config.REMINDER_BEFORE_MINUTES)}\n"
+        f"🔔 Напоминания: за {', '.join(str(m) + ' мин' for m in config.REMINDER_BEFORE_MINUTES)}\n"
         f"📢 Макс. рассылок/день: {config.MAX_MAILING_PER_DAY}\n"
         f"🎁 Реферальная скидка: {config.REFERRAL_BONUS_PERCENT}%\n"
         f"🔒 Rate limit: {config.ADMIN_MAX_FAILED_ATTEMPTS} попыток, "

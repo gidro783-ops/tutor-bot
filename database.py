@@ -1062,25 +1062,6 @@ class Database:
                                source: str = None,
                                source_chat_id: int = None,
                                metadata: dict = None):
-        """ИСПРАВЛЕНО: funnel вместо funnel."""
-        try:
-            await self.db.execute(
-                """INSERT INTO funnel_events
-                   (user_id, event_type, source,
-                    source_chat_id, metadata)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (user_id, event_type, source, source_chat_id,
-                 json.dumps(metadata or {}))
-            )
-            await self.db.commit()
-        except Exception as e:
-            logger.error(f"[log_funnel_event] Failed: {e}")
-    # Обратная совместимость — старые вызовы log_funnel_event тоже работают
-    async def log_funnel_event(self, user_id: int,
-                               event_type: str,
-                               source: str = None,
-                               source_chat_id: int = None,
-                               metadata: dict = None):
         """Алиас с опечаткой для обратной совместимости."""
         await self.log_funnel_event(
             user_id, event_type, source, source_chat_id, metadata
