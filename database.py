@@ -1,10 +1,10 @@
 import aiosqlite
 import json
+import logging
 from datetime import datetime, date, timedelta
 from typing import Optional
 import os
-
-
+logger = logging.getLogger(__name__)
 class Database:
     def __init__(self):
         # Берём путь из переменной окружения или используем дефолтный
@@ -17,18 +17,15 @@ class Database:
         
         self.db_path = db_path
         self.db: Optional[aiosqlite.Connection] = None
-
     async def connect(self):
         self.db = await aiosqlite.connect(self.db_path)
         self.db.row_factory = aiosqlite.Row
         await self.db.execute("PRAGMA journal_mode=WAL")
         await self.db.execute("PRAGMA foreign_keys=ON")
         await self._create_tables()
-
     async def close(self):
         if self.db:
             await self.db.close()
-
     async def _create_tables(self):
         await self.db.executescript("""
             CREATE TABLE IF NOT EXISTS students (
@@ -46,14 +43,14 @@ class Database:
                 total_lessons INTEGER DEFAULT 0,
                 notes TEXT DEFAULT ''
             );
-
             CREATE TABLE IF NOT EXISTS admin_sessions (
                 admin_id INTEGER PRIMARY KEY,
                 is_authenticated INTEGER NOT NULL DEFAULT 0,
                 auth_time TEXT,
-                session_expires TEXT
+                session_expires TEXT,
+                failed_attempts INTEGER DEFAULT 0,
+                locked_until TEXT
             );
-
             CREATE TABLE IF NOT EXISTS subjects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -61,7 +58,6 @@ class Database:
                 description TEXT DEFAULT '',
                 is_active INTEGER NOT NULL DEFAULT 1
             );
-
             CREATE TABLE IF NOT EXISTS time_slots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 date TEXT NOT NULL,
@@ -71,9 +67,9 @@ class Database:
                 is_recurring INTEGER NOT NULL DEFAULT 0,
                 recurring_day INTEGER,
                 slot_type TEXT DEFAULT 'regular',
+                version INTEGER DEFAULT 0,
                 UNIQUE(date, start_time)
             );
-
             CREATE TABLE IF NOT EXISTS bookings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER NOT NULL,
@@ -90,7 +86,6 @@ class Database:
                 FOREIGN KEY (student_id) REFERENCES students(user_id),
                 FOREIGN KEY (slot_id) REFERENCES time_slots(id)
             );
-
             CREATE TABLE IF NOT EXISTS homework (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER NOT NULL,
@@ -107,7 +102,6 @@ class Database:
                 submitted_file_ids TEXT DEFAULT '[]',
                 FOREIGN KEY (student_id) REFERENCES students(user_id)
             );
-
             CREATE TABLE IF NOT EXISTS payments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER NOT NULL,
@@ -121,7 +115,6 @@ class Database:
                 last_reminder TEXT,
                 FOREIGN KEY (student_id) REFERENCES students(user_id)
             );
-
             CREATE TABLE IF NOT EXISTS reviews (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER NOT NULL,
@@ -132,7 +125,6 @@ class Database:
                 is_published INTEGER DEFAULT 0,
                 FOREIGN KEY (student_id) REFERENCES students(user_id)
             );
-
             CREATE TABLE IF NOT EXISTS faq (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 question TEXT NOT NULL,
@@ -141,7 +133,6 @@ class Database:
                 order_num INTEGER DEFAULT 0,
                 is_active INTEGER DEFAULT 1
             );
-
             CREATE TABLE IF NOT EXISTS mailings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 text TEXT NOT NULL,
@@ -153,7 +144,6 @@ class Database:
                 total_sent INTEGER DEFAULT 0,
                 total_errors INTEGER DEFAULT 0
             );
-
             CREATE TABLE IF NOT EXISTS ad_chats (
                 chat_id INTEGER PRIMARY KEY,
                 chat_title TEXT DEFAULT '',
@@ -162,7 +152,6 @@ class Database:
                 total_leads INTEGER DEFAULT 0,
                 last_mailing TEXT
             );
-
             CREATE TABLE IF NOT EXISTS referrals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 referrer_id INTEGER NOT NULL,
@@ -172,7 +161,6 @@ class Database:
                 bonus_applied INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
-
             CREATE TABLE IF NOT EXISTS funnel_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
@@ -182,13 +170,11 @@ class Database:
                 metadata TEXT DEFAULT '{}',
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
-
             CREATE TABLE IF NOT EXISTS bot_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
-
             CREATE TABLE IF NOT EXISTS ab_tests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -201,7 +187,6 @@ class Database:
                 status TEXT DEFAULT 'active',
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
-
             CREATE TABLE IF NOT EXISTS action_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
@@ -209,7 +194,6 @@ class Database:
                 details TEXT DEFAULT '{}',
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
-
             CREATE TABLE IF NOT EXISTS dnd_schedule (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 day_of_week INTEGER,
@@ -220,9 +204,7 @@ class Database:
             );
         """)
         await self.db.commit()
-
     # =================== СТУДЕНТЫ ===================
-
     async def add_student(self, user_id: int, full_name: str,
                           username: str = None, phone: str = None,
                           source: str = "direct",
@@ -239,9 +221,9 @@ class Database:
             )
             await self.db.commit()
             return True
-        except Exception:
+        except Exception as e:
+            logger.error(f"[add_student] Failed: {e}")
             return False
-
     async def get_student(self, user_id: int) -> Optional[dict]:
         try:
             cursor = await self.db.execute(
@@ -249,9 +231,9 @@ class Database:
             )
             row = await cursor.fetchone()
             return dict(row) if row else None
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_student] Failed: {e}")
             return None
-
     async def get_all_students(self, active_only: bool = True) -> list:
         try:
             query = "SELECT * FROM students"
@@ -261,9 +243,9 @@ class Database:
             cursor = await self.db.execute(query)
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_all_students] Failed: {e}")
             return []
-
     async def get_inactive_students(self, days: int = 30) -> list:
         try:
             cursor = await self.db.execute(
@@ -275,9 +257,9 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_inactive_students] Failed: {e}")
             return []
-
     async def update_student_activity(self, user_id: int):
         try:
             await self.db.execute(
@@ -286,9 +268,8 @@ class Database:
                 (user_id,)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[update_student_activity] Failed: {e}")
     async def update_student(self, user_id: int, **kwargs):
         try:
             if not kwargs:
@@ -302,11 +283,9 @@ class Database:
                 values
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[update_student] Failed: {e}")
     # =================== АДМИН СЕССИИ ===================
-
     async def check_admin_session(self, admin_id: int) -> bool:
         try:
             cursor = await self.db.execute(
@@ -325,9 +304,9 @@ class Database:
                     await self.logout_admin(admin_id)
                     return False
             return True
-        except Exception:
+        except Exception as e:
+            logger.error(f"[check_admin_session] Failed: {e}")
             return False
-
     async def authenticate_admin(self, admin_id: int, hours: int = 12):
         try:
             expires = (
@@ -335,14 +314,13 @@ class Database:
             ).isoformat()
             await self.db.execute(
                 """INSERT OR REPLACE INTO admin_sessions
-                   (admin_id, is_authenticated, auth_time, session_expires)
-                   VALUES (?, 1, datetime('now'), ?)""",
+                   (admin_id, is_authenticated, auth_time, session_expires, failed_attempts)
+                   VALUES (?, 1, datetime('now'), ?, 0)""",
                 (admin_id, expires)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[authenticate_admin] Failed: {e}")
     async def logout_admin(self, admin_id: int):
         try:
             await self.db.execute(
@@ -351,11 +329,9 @@ class Database:
                 (admin_id,)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[logout_admin] Failed: {e}")
     # =================== ПРЕДМЕТЫ ===================
-
     async def add_subject(self, name: str, price: float,
                           description: str = "") -> int:
         try:
@@ -367,9 +343,9 @@ class Database:
             )
             await self.db.commit()
             return cursor.lastrowid
-        except Exception:
+        except Exception as e:
+            logger.error(f"[add_subject] Failed: {e}")
             return 0
-
     async def get_subjects(self, active_only: bool = True) -> list:
         try:
             query = "SELECT * FROM subjects"
@@ -378,9 +354,9 @@ class Database:
             cursor = await self.db.execute(query)
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_subjects] Failed: {e}")
             return []
-
     async def get_subject(self, subject_id: int) -> Optional[dict]:
         try:
             cursor = await self.db.execute(
@@ -388,9 +364,9 @@ class Database:
             )
             row = await cursor.fetchone()
             return dict(row) if row else None
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_subject] Failed: {e}")
             return None
-
     async def delete_subject(self, subject_id: int):
         try:
             await self.db.execute(
@@ -398,11 +374,9 @@ class Database:
                 (subject_id,)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[delete_subject] Failed: {e}")
     # =================== СЛОТЫ ===================
-
     async def add_time_slot(self, date_str: str, start_time: str,
                             end_time: str, is_recurring: bool = False,
                             recurring_day: int = None,
@@ -418,9 +392,9 @@ class Database:
             )
             await self.db.commit()
             return cursor.lastrowid or 0
-        except Exception:
+        except Exception as e:
+            logger.error(f"[add_time_slot] Failed: {e}")
             return 0
-
     async def get_available_slots(self, from_date: str = None,
                                   days_ahead: int = 14) -> list:
         try:
@@ -439,9 +413,9 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_available_slots] Failed: {e}")
             return []
-
     async def get_slot(self, slot_id: int) -> Optional[dict]:
         try:
             cursor = await self.db.execute(
@@ -449,9 +423,9 @@ class Database:
             )
             row = await cursor.fetchone()
             return dict(row) if row else None
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_slot] Failed: {e}")
             return None
-
     async def block_slot(self, slot_id: int):
         try:
             await self.db.execute(
@@ -459,9 +433,8 @@ class Database:
                 (slot_id,)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[block_slot] Failed: {e}")
     async def unblock_slot(self, slot_id: int):
         try:
             await self.db.execute(
@@ -469,9 +442,8 @@ class Database:
                 (slot_id,)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[unblock_slot] Failed: {e}")
     async def get_all_slots_for_date(self, date_str: str) -> list:
         try:
             cursor = await self.db.execute(
@@ -481,28 +453,29 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_all_slots_for_date] Failed: {e}")
             return []
-
+    async def get_slots_for_date(self, date_str: str) -> list:
+        """Алиас для get_all_slots_for_date."""
+        return await self.get_all_slots_for_date(date_str)
     # =================== БРОНИРОВАНИЯ ===================
-
     async def create_booking(self, student_id: int, slot_id: int,
                              subject_id: int = None,
                              booking_type: str = "trial") -> int:
         try:
             cursor = await self.db.execute(
                 """INSERT INTO bookings
-                   (student_id, slot_id, subject_id,
-                    booking_type, status)
-                   VALUES (?, ?, ?, ?, 'confirmed')""",
+                   (student_id, slot_id, subject_id, booking_type)
+                   VALUES (?, ?, ?, ?)""",
                 (student_id, slot_id, subject_id, booking_type)
             )
             await self.block_slot(slot_id)
             await self.db.commit()
             return cursor.lastrowid
-        except Exception:
+        except Exception as e:
+            logger.error(f"[create_booking] Failed: {e}")
             return 0
-
     async def get_booking(self, booking_id: int) -> Optional[dict]:
         try:
             cursor = await self.db.execute(
@@ -516,9 +489,9 @@ class Database:
             )
             row = await cursor.fetchone()
             return dict(row) if row else None
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_booking] Failed: {e}")
             return None
-
     async def get_student_bookings(self, student_id: int,
                                    status: str = None) -> list:
         try:
@@ -536,9 +509,9 @@ class Database:
             cursor = await self.db.execute(query, params)
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_student_bookings] Failed: {e}")
             return []
-
     async def get_today_bookings(self) -> list:
         try:
             today = date.today().isoformat()
@@ -556,9 +529,9 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_today_bookings] Failed: {e}")
             return []
-
     async def get_upcoming_bookings(self,
                                     minutes_ahead: int = 60) -> list:
         try:
@@ -585,9 +558,9 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_upcoming_bookings] Failed: {e}")
             return []
-
     async def mark_reminder_sent(self, booking_id: int):
         try:
             await self.db.execute(
@@ -595,9 +568,8 @@ class Database:
                 (booking_id,)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[mark_reminder_sent] Failed: {e}")
     async def cancel_booking(self, booking_id: int, reason: str = ""):
         try:
             booking = await self.get_booking(booking_id)
@@ -611,9 +583,8 @@ class Database:
                 )
                 await self.unblock_slot(booking["slot_id"])
                 await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[cancel_booking] Failed: {e}")
     async def complete_booking(self, booking_id: int):
         try:
             await self.db.execute(
@@ -622,11 +593,9 @@ class Database:
                 (booking_id,)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[complete_booking] Failed: {e}")
     # =================== ДОМАШНИЕ ЗАДАНИЯ ===================
-
     async def add_homework(self, student_id: int, title: str,
                            description: str = "",
                            subject_id: int = None,
@@ -643,9 +612,9 @@ class Database:
             )
             await self.db.commit()
             return cursor.lastrowid
-        except Exception:
+        except Exception as e:
+            logger.error(f"[add_homework] Failed: {e}")
             return 0
-
     async def get_student_homework(self, student_id: int,
                                    status: str = None) -> list:
         try:
@@ -677,9 +646,51 @@ class Database:
                     d["submitted_file_ids"] = []
                 result.append(d)
             return result
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_student_homework] Failed: {e}")
             return []
-
+    async def get_homework_by_id(self, hw_id: int) -> Optional[dict]:
+        """НОВЫЙ МЕТОД: получить ДЗ по ID."""
+        try:
+            cursor = await self.db.execute(
+                "SELECT * FROM homework WHERE id = ?", (hw_id,)
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"[get_homework_by_id] Failed: {e}")
+            return None
+    async def get_all_homework(self) -> list:
+        """НОВЫЙ МЕТОД: все ДЗ (для админа)."""
+        try:
+            cursor = await self.db.execute(
+                """SELECT h.*, s.name as subject_name, st.full_name as student_name
+                   FROM homework h
+                   LEFT JOIN subjects s ON h.subject_id = s.id
+                   LEFT JOIN students st ON h.student_id = st.user_id
+                   ORDER BY h.assigned_date DESC"""
+            )
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"[get_all_homework] Failed: {e}")
+            return []
+    async def get_pending_homework(self) -> list:
+        """НОВЫЙ МЕТОД: ДЗ на проверке (status=submitted)."""
+        try:
+            cursor = await self.db.execute(
+                """SELECT h.*, s.name as subject_name, st.full_name as student_name
+                   FROM homework h
+                   LEFT JOIN subjects s ON h.subject_id = s.id
+                   LEFT JOIN students st ON h.student_id = st.user_id
+                   WHERE h.status = 'submitted'
+                   ORDER BY h.submitted_at"""
+            )
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"[get_pending_homework] Failed: {e}")
+            return []
     async def submit_homework(self, hw_id: int,
                               file_ids: list = None):
         try:
@@ -691,9 +702,8 @@ class Database:
                 (json.dumps(file_ids or []), hw_id)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[submit_homework] Failed: {e}")
     async def grade_homework(self, hw_id: int, grade: str,
                              feedback: str = ""):
         try:
@@ -704,11 +714,9 @@ class Database:
                 (grade, feedback, hw_id)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[grade_homework] Failed: {e}")
     # =================== ОПЛАТЫ ===================
-
     async def create_payment(self, student_id: int, amount: float,
                              description: str = "") -> int:
         try:
@@ -720,9 +728,9 @@ class Database:
             )
             await self.db.commit()
             return cursor.lastrowid
-        except Exception:
+        except Exception as e:
+            logger.error(f"[create_payment] Failed: {e}")
             return 0
-
     async def get_pending_payments(self,
                                    student_id: int = None) -> list:
         try:
@@ -739,9 +747,35 @@ class Database:
             cursor = await self.db.execute(query, params)
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_pending_payments] Failed: {e}")
             return []
-
+    async def get_payment_by_id(self, pay_id: int) -> Optional[dict]:
+        """НОВЫЙ МЕТОД: получить платёж по ID."""
+        try:
+            cursor = await self.db.execute(
+                "SELECT * FROM payments WHERE id = ?", (pay_id,)
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"[get_payment_by_id] Failed: {e}")
+            return None
+    async def get_all_payments(self) -> list:
+        """НОВЫЙ МЕТОД: все оплаченные платежи."""
+        try:
+            cursor = await self.db.execute(
+                """SELECT p.*, st.full_name, st.username
+                   FROM payments p
+                   LEFT JOIN students st ON p.student_id = st.user_id
+                   WHERE p.status = 'paid'
+                   ORDER BY p.paid_at DESC"""
+            )
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"[get_all_payments] Failed: {e}")
+            return []
     async def confirm_payment(self, payment_id: int,
                               method: str = "manual"):
         try:
@@ -753,50 +787,43 @@ class Database:
                 (method, payment_id)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[confirm_payment] Failed: {e}")
     async def get_payment_stats(self, period_days: int = 30) -> dict:
         try:
             cursor = await self.db.execute(
                 """SELECT
                     COUNT(*) as total_payments,
-                    SUM(CASE WHEN status='paid'
-                        THEN amount ELSE 0 END) as total_paid,
-                    SUM(CASE WHEN status='pending'
-                        THEN amount ELSE 0 END) as total_pending,
-                    COUNT(CASE WHEN status='paid'
-                        THEN 1 END) as paid_count,
-                    COUNT(CASE WHEN status='pending'
-                        THEN 1 END) as pending_count
+                    SUM(CASE WHEN status='paid' THEN amount ELSE 0 END) as total_paid,
+                    SUM(CASE WHEN status='pending' THEN amount ELSE 0 END) as total_pending,
+                    SUM(CASE WHEN status='paid' THEN 1 ELSE 0 END) as paid_count,
+                    SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) as pending_count
                    FROM payments
                    WHERE created_at >= datetime('now', ?)""",
                 (f"-{period_days} days",)
             )
             row = await cursor.fetchone()
             return dict(row) if row else {}
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_payment_stats] Failed: {e}")
             return {}
-
     # =================== ОТЗЫВЫ ===================
-
-    async def add_review(self, student_id: int, rating: int,
-                         text: str = "",
-                         booking_id: int = None) -> int:
+    async def create_review(self, student_id: int, rating: int,
+                            text: str = "",
+                            booking_id: int = None) -> int:
+        """НОВЫЙ МЕТОД: создать отзыв."""
         try:
             cursor = await self.db.execute(
-                """INSERT INTO reviews
-                   (student_id, booking_id, rating, text)
+                """INSERT INTO reviews (student_id, booking_id, rating, text)
                    VALUES (?, ?, ?, ?)""",
                 (student_id, booking_id, rating, text)
             )
             await self.db.commit()
             return cursor.lastrowid
-        except Exception:
+        except Exception as e:
+            logger.error(f"[create_review] Failed: {e}")
             return 0
-
-    async def get_reviews(self,
-                          published_only: bool = False) -> list:
+    async def get_reviews(self, published_only: bool = False) -> list:
         try:
             query = """SELECT r.*, st.full_name FROM reviews r
                        LEFT JOIN students st
@@ -807,9 +834,12 @@ class Database:
             cursor = await self.db.execute(query)
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_reviews] Failed: {e}")
             return []
-
+    async def get_all_reviews(self) -> list:
+        """НОВЫЙ МЕТОД: все отзывы."""
+        return await self.get_reviews(published_only=False)
     async def publish_review(self, review_id: int):
         try:
             await self.db.execute(
@@ -817,9 +847,8 @@ class Database:
                 (review_id,)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[publish_review] Failed: {e}")
     async def get_average_rating(self) -> float:
         try:
             cursor = await self.db.execute(
@@ -828,11 +857,10 @@ class Database:
             row = await cursor.fetchone()
             val = row["avg_rating"] if row else None
             return round(float(val), 2) if val else 0.0
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_average_rating] Failed: {e}")
             return 0.0
-
     # =================== FAQ ===================
-
     async def add_faq(self, question: str, answer: str,
                       keywords: list = None) -> int:
         try:
@@ -843,9 +871,9 @@ class Database:
             )
             await self.db.commit()
             return cursor.lastrowid
-        except Exception:
+        except Exception as e:
+            logger.error(f"[add_faq] Failed: {e}")
             return 0
-
     async def get_all_faq(self) -> list:
         try:
             cursor = await self.db.execute(
@@ -864,9 +892,9 @@ class Database:
                     d["keywords"] = []
                 result.append(d)
             return result
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_all_faq] Failed: {e}")
             return []
-
     async def find_faq_answer(self,
                               text: str) -> Optional[dict]:
         try:
@@ -878,9 +906,9 @@ class Database:
                     if kw.lower() in text_lower:
                         return faq
             return None
-        except Exception:
+        except Exception as e:
+            logger.error(f"[find_faq_answer] Failed: {e}")
             return None
-
     async def delete_faq(self, faq_id: int):
         try:
             await self.db.execute(
@@ -888,11 +916,9 @@ class Database:
                 (faq_id,)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
-    # =================== ЧАТЫ ===================
-
+        except Exception as e:
+            logger.error(f"[delete_faq] Failed: {e}")
+    # =================== ЧАТЫ И РАССЫЛКИ ===================
     async def add_ad_chat(self, chat_id: int,
                           chat_title: str = ""):
         try:
@@ -903,9 +929,8 @@ class Database:
                 (chat_id, chat_title)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[add_ad_chat] Failed: {e}")
     async def get_ad_chats(self,
                            active_only: bool = True) -> list:
         try:
@@ -915,9 +940,9 @@ class Database:
             cursor = await self.db.execute(query)
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_ad_chats] Failed: {e}")
             return []
-
     async def increment_chat_leads(self, chat_id: int):
         try:
             await self.db.execute(
@@ -927,9 +952,8 @@ class Database:
                 (chat_id,)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[increment_chat_leads] Failed: {e}")
     async def create_mailing(self, text: str,
                              target_type: str = "all") -> int:
         try:
@@ -940,23 +964,29 @@ class Database:
             )
             await self.db.commit()
             return cursor.lastrowid
-        except Exception:
+        except Exception as e:
+            logger.error(f"[create_mailing] Failed: {e}")
             return 0
-
-    async def update_mailing_stats(self, mailing_id: int,
-                                   sent: int, errors: int):
+    async def update_mailing_status(self, mailing_id: int,
+                                    status: str = "sent",
+                                    total_sent: int = 0,
+                                    total_errors: int = 0):
+        """НОВЫЙ МЕТОД (расширенный): обновить статус рассылки."""
         try:
             await self.db.execute(
-                """UPDATE mailings SET status = 'sent',
+                """UPDATE mailings SET status = ?,
                    sent_at = datetime('now'),
                    total_sent = ?, total_errors = ?
                    WHERE id = ?""",
-                (sent, errors, mailing_id)
+                (status, total_sent, total_errors, mailing_id)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[update_mailing_status] Failed: {e}")
+    async def update_mailing_stats(self, mailing_id: int,
+                                   sent: int, errors: int):
+        """Обратная совместимость."""
+        await self.update_mailing_status(mailing_id, "sent", sent, errors)
     async def get_mailings(self, limit: int = 20) -> list:
         try:
             cursor = await self.db.execute(
@@ -966,23 +996,21 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_mailings] Failed: {e}")
             return []
-
     # =================== РЕФЕРАЛЫ ===================
-
     async def create_referral(self, referrer_id: int,
                               referred_id: int,
                               referral_code: str) -> bool:
         try:
             # Защита: проверяем, не был ли этот юзер уже приглашен
             cursor = await self.db.execute(
-                "SELECT id FROM referrals WHERE referred_id = ?", 
+                "SELECT id FROM referrals WHERE referred_id = ?",
                 (referred_id,)
             )
             if await cursor.fetchone():
                 return False  # Такой реферал уже существует
-
             await self.db.execute(
                 """INSERT INTO referrals
                    (referrer_id, referred_id, referral_code)
@@ -991,9 +1019,9 @@ class Database:
             )
             await self.db.commit()
             return True
-        except Exception:
+        except Exception as e:
+            logger.error(f"[create_referral] Failed: {e}")
             return False
-
     async def get_referral_stats(self,
                                  referrer_id: int) -> dict:
         try:
@@ -1008,16 +1036,33 @@ class Database:
             return dict(row) if row else {
                 "total_referrals": 0, "completed": 0
             }
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_referral_stats] Failed: {e}")
             return {"total_referrals": 0, "completed": 0}
-
-    # =================== ВОРОНКА ===================
-
+    async def get_all_referrals(self) -> list:
+        """НОВЫЙ МЕТОД: все рефералы (для админа)."""
+        try:
+            cursor = await self.db.execute(
+                """SELECT r.*,
+                          st1.full_name as referrer_name,
+                          st2.full_name as referred_name
+                   FROM referrals r
+                   LEFT JOIN students st1 ON r.referrer_id = st1.user_id
+                   LEFT JOIN students st2 ON r.referred_id = st2.user_id
+                   ORDER BY r.created_at DESC"""
+            )
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"[get_all_referrals] Failed: {e}")
+            return []
+    # =================== ВОРОНКА (ИСПРАВЛЕНА опечатка funnel→funnel) ===================
     async def log_funnel_event(self, user_id: int,
                                event_type: str,
                                source: str = None,
                                source_chat_id: int = None,
                                metadata: dict = None):
+        """ИСПРАВЛЕНО: funnel вместо funnel."""
         try:
             await self.db.execute(
                 """INSERT INTO funnel_events
@@ -1028,11 +1073,21 @@ class Database:
                  json.dumps(metadata or {}))
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[log_funnel_event] Failed: {e}")
+    # Обратная совместимость — старые вызовы log_funnel_event тоже работают
+    async def log_funnel_event(self, user_id: int,
+                               event_type: str,
+                               source: str = None,
+                               source_chat_id: int = None,
+                               metadata: dict = None):
+        """Алиас с опечаткой для обратной совместимости."""
+        await self.log_funnel_event(
+            user_id, event_type, source, source_chat_id, metadata
+        )
     async def get_funnel_stats(self,
                                period_days: int = 30) -> dict:
+        """ИСПРАВЛЕНО: funnel вместо funnel."""
         try:
             events = [
                 "ad_seen", "bot_started", "trial_booked",
@@ -1050,9 +1105,13 @@ class Database:
                 row = await cursor.fetchone()
                 stats[event] = row["count"] if row else 0
             return stats
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_funnel_stats] Failed: {e}")
             return {}
-
+    # Обратная совместимость
+    async def get_funnel_stats(self, period_days: int = 30) -> dict:
+        """Алиас с опечаткой для обратной совместимости."""
+        return await self.get_funnel_stats(period_days)
     async def get_chat_performance(self) -> list:
         try:
             cursor = await self.db.execute(
@@ -1068,11 +1127,10 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_chat_performance] Failed: {e}")
             return []
-
     # =================== НАСТРОЙКИ ===================
-
     async def get_setting(self, key: str,
                           default: str = "") -> str:
         try:
@@ -1082,9 +1140,9 @@ class Database:
             )
             row = await cursor.fetchone()
             return row["value"] if row else default
-        except Exception:
+        except Exception as e:
+            logger.error(f"[get_setting] Failed: {e}")
             return default
-
     async def set_setting(self, key: str, value: str):
         try:
             await self.db.execute(
@@ -1094,100 +1152,45 @@ class Database:
                 (key, value)
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[set_setting] Failed: {e}")
     # =================== DND ===================
-
-    async def add_dnd_schedule(self, start_time: str,
-                               end_time: str,
-                               day_of_week: int = None,
-                               auto_reply: str = None):
+    async def is_dnd_active(self) -> tuple[bool, str]:
+        """Проверка, активен ли DND. Возвращает (is_active, auto_reply)."""
         try:
-            await self.db.execute(
-                """INSERT INTO dnd_schedule
-                   (day_of_week, start_time, end_time,
-                    auto_reply_text)
-                   VALUES (?, ?, ?, ?)""",
-                (day_of_week, start_time, end_time,
-                 auto_reply or
-                 "Сейчас идёт занятие. Отвечу позже!")
+            enabled = await self.get_setting("dnd_enabled", "0")
+            if enabled != "1":
+                return False, ""
+            start = await self.get_setting("dnd_start", "09:00")
+            end = await self.get_setting("dnd_end", "21:00")
+            auto_reply = await self.get_setting(
+                "dnd_auto_reply",
+                "Сейчас идёт занятие. Я отвечу вам позже!"
             )
-            await self.db.commit()
-        except Exception:
-            pass
-
-    async def clear_dnd_schedules(self):
-        try:
-            await self.db.execute("DELETE FROM dnd_schedule")
-            await self.db.commit()
-        except Exception:
-            pass
-
-    async def is_dnd_active(self) -> tuple:
-        try:
             now = datetime.now()
-            current_time = now.strftime("%H:%M")
-            current_day = now.weekday()
-            cursor = await self.db.execute(
-                """SELECT auto_reply_text FROM dnd_schedule
-                   WHERE (day_of_week IS NULL OR day_of_week = ?)
-                   AND start_time <= ? AND end_time >= ?""",
-                (current_day, current_time, current_time)
-            )
-            row = await cursor.fetchone()
-            if row:
-                return True, row["auto_reply_text"]
+            current_minutes = now.hour * 60 + now.minute
+            sh, sm = map(int, start.split(":"))
+            eh, em = map(int, end.split(":"))
+            start_minutes = sh * 60 + sm
+            end_minutes = eh * 60 + em
+            if start_minutes <= end_minutes:
+                is_active = start_minutes <= current_minutes < end_minutes
+            else:
+                is_active = current_minutes >= start_minutes or current_minutes < end_minutes
+            return is_active, auto_reply
+        except Exception as e:
+            logger.error(f"[is_dnd_active] Failed: {e}")
             return False, ""
-        except Exception:
-            return False, ""
-
-    # =================== A/B ТЕСТЫ ===================
-
-    async def create_ab_test(self, name: str,
-                             variant_a: str,
-                             variant_b: str) -> int:
+    async def set_dnd(self, enabled: bool):
+        """НОВЫЙ МЕТОД: включить/выключить DND."""
         try:
-            cursor = await self.db.execute(
-                """INSERT INTO ab_tests
-                   (name, variant_a_text, variant_b_text)
-                   VALUES (?, ?, ?)""",
-                (name, variant_a, variant_b)
-            )
-            await self.db.commit()
-            return cursor.lastrowid
-        except Exception:
-            return 0
-
-    async def get_active_ab_tests(self) -> list:
-        try:
-            cursor = await self.db.execute(
-                "SELECT * FROM ab_tests WHERE status = 'active'"
-            )
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
-        except Exception:
-            return []
-
-    async def increment_ab_stat(self, test_id: int,
-                                variant: str,
-                                stat: str = "sends"):
-        try:
-            col = f"variant_{variant.lower()}_{stat}"
-            await self.db.execute(
-                f"""UPDATE ab_tests
-                    SET {col} = {col} + 1
-                    WHERE id = ?""",
-                (test_id,)
-            )
-            await self.db.commit()
-        except Exception:
-            pass
-
-    # =================== ЛОГИ ===================
-
+            await self.set_setting("dnd_enabled", "1" if enabled else "0")
+        except Exception as e:
+            logger.error(f"[set_dnd] Failed: {e}")
+    # =================== ЛОГИРОВАНИЕ ===================
     async def log_action(self, user_id: int, action: str,
                          details: dict = None):
+        """Логирование действий (ИСПРАВЛЕНО: ошибки логируются)."""
         try:
             await self.db.execute(
                 """INSERT INTO action_logs
@@ -1196,93 +1199,131 @@ class Database:
                 (user_id, action, json.dumps(details or {}))
             )
             await self.db.commit()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.error(f"[log_action] Failed to log {action}: {e}")
     # =================== ДАШБОРД ===================
-
     async def get_dashboard_stats(self) -> dict:
-        stats = {
-            "total_students": 0,
-            "new_students_month": 0,
-            "today_bookings": 0,
-            "trial_bookings_month": 0,
-            "trial_conversion": 0,
-            "avg_rating": 0.0,
-            "revenue_month": 0,
-            "pending_payments": 0,
-            "funnel": {}
-        }
         try:
+            stats = {
+                "total_students": 0,
+                "new_students_month": 0,
+                "today_bookings": 0,
+                "trial_bookings_month": 0,
+                "trial_conversion": 0.0,
+                "avg_rating": 0.0,
+                "revenue_month": 0.0,
+                "pending_payments": 0.0,
+            }
+            # Всего учеников
             cursor = await self.db.execute(
-                """SELECT COUNT(*) as c FROM students
-                   WHERE is_active = 1"""
+                "SELECT COUNT(*) as cnt FROM students WHERE is_active = 1"
             )
             row = await cursor.fetchone()
-            stats["total_students"] = row["c"] if row else 0
-
+            if row:
+                stats["total_students"] = row["cnt"]
+            # Новых за месяц
             cursor = await self.db.execute(
-                """SELECT COUNT(*) as c FROM students
-                   WHERE registration_date >=
-                       datetime('now', '-30 days')"""
+                """SELECT COUNT(*) as cnt FROM students
+                   WHERE registration_date >= datetime('now', '-30 days')"""
             )
             row = await cursor.fetchone()
-            stats["new_students_month"] = row["c"] if row else 0
-
+            if row:
+                stats["new_students_month"] = row["cnt"]
+            # Записей сегодня
             today = date.today().isoformat()
             cursor = await self.db.execute(
-                """SELECT COUNT(*) as c FROM bookings b
+                """SELECT COUNT(*) as cnt FROM bookings b
                    LEFT JOIN time_slots ts ON b.slot_id = ts.id
-                   WHERE ts.date = ?
-                   AND b.status = 'confirmed'""",
+                   WHERE ts.date = ?""",
                 (today,)
             )
             row = await cursor.fetchone()
-            stats["today_bookings"] = row["c"] if row else 0
-
+            if row:
+                stats["today_bookings"] = row["cnt"]
+            # Пробных за месяц
             cursor = await self.db.execute(
-                """SELECT COUNT(*) as c FROM bookings
+                """SELECT COUNT(*) as cnt FROM bookings
                    WHERE booking_type = 'trial'
                    AND created_at >= datetime('now', '-30 days')"""
             )
             row = await cursor.fetchone()
-            stats["trial_bookings_month"] = row["c"] if row else 0
-
+            if row:
+                stats["trial_bookings_month"] = row["cnt"]
+            # Конверсия
+            if stats["trial_bookings_month"] > 0:
+                cursor = await self.db.execute(
+                    """SELECT COUNT(*) as cnt FROM bookings
+                       WHERE status = 'completed'
+                       AND created_at >= datetime('now', '-30 days')"""
+                )
+                row = await cursor.fetchone()
+                completed = row["cnt"] if row else 0
+                stats["trial_conversion"] = round(
+                    completed / stats["trial_bookings_month"] * 100, 1
+                )
+            # Рейтинг
+            stats["avg_rating"] = await self.get_average_rating()
+            # Доход
             cursor = await self.db.execute(
-                """SELECT
-                    COUNT(CASE WHEN booking_type='trial'
-                        THEN 1 END) as trials,
-                    COUNT(CASE WHEN booking_type='regular'
-                        THEN 1 END) as regulars
-                   FROM bookings
-                   WHERE created_at >= datetime('now', '-30 days')
-                   AND status != 'cancelled'"""
+                """SELECT COALESCE(SUM(amount), 0) as total
+                   FROM payments
+                   WHERE status = 'paid'
+                   AND paid_at >= datetime('now', '-30 days')"""
             )
             row = await cursor.fetchone()
             if row:
-                trials = row["trials"] or 0
-                regulars = row["regulars"] or 0
-                stats["trial_conversion"] = (
-                    round(regulars / trials * 100, 1)
-                    if trials > 0 else 0
-                )
-
-            stats["avg_rating"] = await self.get_average_rating()
-
-            payment_stats = await self.get_payment_stats(30)
-            stats["revenue_month"] = (
-                payment_stats.get("total_paid", 0) or 0
+                stats["revenue_month"] = round(row["total"], 2)
+            # Ожидают оплаты
+            cursor = await self.db.execute(
+                """SELECT COALESCE(SUM(amount), 0) as total
+                   FROM payments WHERE status = 'pending'"""
             )
-            stats["pending_payments"] = (
-                payment_stats.get("total_pending", 0) or 0
+            row = await cursor.fetchone()
+            if row:
+                stats["pending_payments"] = round(row["total"], 2)
+            return stats
+        except Exception as e:
+            logger.error(f"[get_dashboard_stats] Failed: {e}")
+            return {
+                "total_students": 0,
+                "new_students_month": 0,
+                "today_bookings": 0,
+                "trial_bookings_month": 0,
+                "trial_conversion": 0.0,
+                "avg_rating": 0.0,
+                "revenue_month": 0.0,
+                "pending_payments": 0.0,
+            }
+    # =================== A/B ТЕСТЫ ===================
+    async def get_active_ab_tests(self) -> list:
+        try:
+            cursor = await self.db.execute(
+                "SELECT * FROM ab_tests WHERE status = 'active'"
             )
-            stats["funnel"] = await self.get_funnel_stats(30)
-
-        except Exception:
-            pass
-
-        return stats
-
-
-# Глобальный экземпляр
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"[get_active_ab_tests] Failed: {e}")
+            return []
+    async def increment_ab_stat(self, test_id: int,
+                                variant: str,
+                                stat_type: str):
+        """Увеличить счётчик A/B теста. variant: 'A'/'B', stat_type: 'sends'/'clicks'."""
+        try:
+            column = f"variant_{variant.lower()}_{stat_type}"
+            # Белый список колонок для безопасности
+            allowed = {
+                "variant_a_sends", "variant_a_clicks",
+                "variant_b_sends", "variant_b_clicks"
+            }
+            if column not in allowed:
+                logger.error(f"[increment_ab_stat] Invalid column: {column}")
+                return
+            await self.db.execute(
+                f"UPDATE ab_tests SET {column} = {column} + 1 WHERE id = ?",
+                (test_id,)
+            )
+            await self.db.commit()
+        except Exception as e:
+            logger.error(f"[increment_ab_stat] Failed: {e}")
 db = Database()

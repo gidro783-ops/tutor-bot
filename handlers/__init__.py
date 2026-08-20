@@ -7,7 +7,6 @@ from handlers.reviews import router as reviews_router
 from handlers.analytics import router as analytics_router
 from handlers.mailing import router as mailing_router
 from handlers.referral import router as referral_router
-
 __all__ = [
     "admin_router",
     "student_router",

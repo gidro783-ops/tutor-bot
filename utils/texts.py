@@ -9,26 +9,19 @@ class Texts:
         "❓ Задать вопрос\n\n"
         "Выберите действие ниже 👇"
     )
-
     WELCOME_REFERRAL = (
         "👋 Здравствуйте, {name}!\n\n"
         "Вас пригласил(а) {referrer}! "
         "За это вы получите скидку {bonus}% на первое занятие 🎉\n\n"
         "Выберите действие ниже 👇"
     )
-
     ADMIN_CMD = "🔐 Введите пароль администратора:"
-
-    ADMIN_WRONG_PASSWORD = "❌ Неверный пароль. Попробуйте ещё раз."
-
+    ADMIN_WRONG_PASSWORD = "❌ Неверный пароль."
     ADMIN_SUCCESS = "✅ Авторизация успешна!\n\nДобро пожаловать в админ-панель."
-
     ADMIN_NOT_AUTHORIZED = "⛔ У вас нет доступа к этой команде."
-
     ADMIN_SESSION_EXPIRED = "⏰ Сессия истекла. Введите /admin для повторной авторизации."
-
     ADMIN_PANEL = (
-        "📊 **Панель управления**\n\n"
+        "📊 <b>Панель управления</b>\n\n"
         "👥 Учеников: {total_students}\n"
         "📈 Новых за месяц: {new_students_month}\n"
         "📅 Занятий сегодня: {today_bookings}\n"
@@ -39,11 +32,9 @@ class Texts:
         "⏳ Ожидает оплаты: {pending_payments}₽\n\n"
         "Выберите раздел:"
     )
-
     BOOKING_CHOOSE_SUBJECT = "📚 Выберите предмет:"
     BOOKING_CHOOSE_DATE = "📅 Выберите дату:"
     BOOKING_CHOOSE_TIME = "🕐 Выберите время:"
-
     BOOKING_CONFIRM = (
         "✅ Подтвердите запись:\n\n"
         "📚 Предмет: {subject}\n"
@@ -52,20 +43,16 @@ class Texts:
         "📝 Тип: {booking_type}\n\n"
         "Всё верно?"
     )
-
     BOOKING_SUCCESS = (
         "🎉 Вы успешно записаны!\n\n"
         "📚 {subject}\n"
         "📅 {date} в {start_time}\n\n"
         "Я напомню вам о занятии заранее. До встречи!"
     )
-
     BOOKING_CANCELLED = "❌ Запись отменена."
-
     NO_AVAILABLE_SLOTS = (
         "😔 К сожалению, свободных слотов нет. Попробуйте позже."
     )
-
     REMINDER = (
         "⏰ Напоминание!\n\n"
         "Через {minutes} минут у вас занятие:\n"
@@ -73,7 +60,6 @@ class Texts:
         "🕐 {start_time}\n\n"
         "Ждём вас!"
     )
-
     HW_NEW = (
         "📝 Новое домашнее задание!\n\n"
         "📚 {subject}\n"
@@ -81,25 +67,20 @@ class Texts:
         "{description}\n"
         "📅 Сдать до: {due_date}"
     )
-
     HW_GRADED = (
         "✅ Ваше ДЗ проверено!\n\n"
         "📌 {title}\n"
         "📊 Оценка: {grade}\n"
         "💬 Комментарий: {feedback}"
     )
-
     PAYMENT_REMINDER = (
         "💳 Напоминание об оплате\n\n"
         "Сумма: {amount}₽\n"
         "Описание: {description}\n\n"
         "Пожалуйста, оплатите занятие."
     )
-
     REVIEW_REQUEST = "⭐ Как прошло занятие?\n\nПоставьте оценку от 1 до 5:"
-
     REVIEW_THANKS = "Спасибо за отзыв! ❤️\nВаша оценка: {rating}"
-
     DND_AUTO_REPLY = (
         "🔕 Сейчас идёт занятие.\n"
         "Я отвечу вам в ближайшее время!\n\n"
@@ -107,7 +88,6 @@ class Texts:
         "📅 Записаться на занятие\n"
         "❓ Посмотреть FAQ"
     )
-
     REFERRAL_INFO = (
         "🎁 Ваша реферальная ссылка:\n\n"
         "{link}\n\n"
@@ -115,7 +95,6 @@ class Texts:
         "📊 Приглашено: {total}\n"
         "✅ Активировано: {completed}"
     )
-
     MORNING_SUMMARY = (
         "☀️ Доброе утро!\n\n"
         "📅 Сегодня {date}\n\n"
@@ -124,7 +103,6 @@ class Texts:
         "{bookings_list}\n\n"
         "Хорошего продуктивного дня! 🚀"
     )
-
     REACTIVATION = (
         "👋 {name}, давно не виделись!\n\n"
         "Мы скучаем по вам. Как насчёт продолжить занятия?\n\n"
