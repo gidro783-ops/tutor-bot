@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -1575,7 +1575,7 @@ async def process_ub_mailing_text(message: Message, state: FSMContext):
     builder.button(text="⏰ Каждый день в определённое время", callback_data="ub:sched:daily")
     builder.button(text="🔄 Каждый N часов", callback_data="ub:sched:hours")
     builder.button(text="▶️ Один раз сейчас", callback_data="ub:sched:now")
-    builder.button9(text="❌ Отмена", callback_data="cancel")
+    builder.button(text="❌ Отмена", callback_data="cancel") # Исправлено button9
     builder.adjust(1)
     
     await message.answer(
@@ -1616,7 +1616,8 @@ async def admin_ub_schedule(callback: CallbackQuery, state: FSMContext):
         return
     
     elif sched_type == "daily":
-        await state.set$set_state(UserbotMailing.schedule_time)
+        await state.update_data(schedule_type="daily") # Сохраняем тип
+        await state.set_state(UserbotMailing.schedule_time) # Исправлено
         await callback.message.edit_text(
             "⏰ Введи время отправки (по Мск) в формате ЧЧ:ММ:\n\n"
             "Например: 10:00\n\n"
@@ -1625,14 +1626,13 @@ async def admin_ub_schedule(callback: CallbackQuery, state: FSMContext):
         )
     
     elif sched_type == "hours":
-        await state.update_data(schedule_type="hours")
-        await state.set_state(UserbotMailing.schedule_time)
+        await state.update_data(schedule_type="hours") # Сохраняем тип
+        await state.set_state(UserbotMailing.schedule_time) # Исправлено
         await callback.message.edit_text(
             "🔄 Введи интервал в часах:\n\n"
             "Например: 4 (каждые 4 часа)\n\n"
             "⚠️ Минимум 2 часа для безопасности!"
         )
-
 
 @router.message(UserbotMailing.schedule_time)
 async def process_ub_schedule_time(message: Message, state: FSMContext):

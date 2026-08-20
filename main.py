@@ -67,7 +67,7 @@ async def main():
     try:
         await userbot.connect()
     except Exception as e:
-        logging.warning(f"Userbot не подключен: {e}"
+        logging.warning(f"Userbot не подключен: {e}")
     logging.info("✅ База данных подключена")
 
     bot = Bot(
