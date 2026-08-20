@@ -135,13 +135,32 @@ class UserbotService:
             logger.error(f"Userbot: ошибка поиска @{clean_username}: {e}")
             return None
     async def send_message_safe(self, chat_id: int, text: str) -> bool:
-        """Безопасная отправка сообщения с рандомной задержкой."""
+        """Безопасная отправка сообщения с рандомной задержкой.
+
+        ИСПРАВЛЕНО: обрабатываем FloodWaitError (лимит Telegram) —
+        ждём нужное время и повторяем вместо мгновенного отказа.
+        """
         if not self.is_connected or not self.client:
             return False
         try:
+            from telethon.errors import FloodWaitError
+        except ImportError:
+            FloodWaitError = None
+        try:
             delay = random.uniform(5, 30)
             await asyncio.sleep(delay)
-            await self.client.send_message(chat_id, text)
+            try:
+                await self.client.send_message(chat_id, text)
+            except FloodWaitError as e:
+                wait = int(e.seconds)
+                if wait > 3600:
+                    logger.warning(
+                        f"Userbot: flood-wait {wait}с в чат {chat_id} — пропускаем"
+                    )
+                    return False
+                logger.info(f"Userbot: flood-wait {wait}с, ждём и повторяем...")
+                await asyncio.sleep(wait + 5)
+                await self.client.send_message(chat_id, text)
             logger.info(f"✅ Userbot: сообщение отправлено в чат {chat_id}")
             return True
         except Exception as e:

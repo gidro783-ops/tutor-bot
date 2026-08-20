@@ -20,10 +20,14 @@ async def my_payments_menu(message: Message):
     if not payments:
         await message.answer("✅ Нет неоплаченных счетов!")
         return
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
     text = "💳 <b>Неоплаченные счета:</b>\n\n"
     for p in payments:
-        text += f"• {p['amount']}₽ — {escape_html(p.get('description', ''))}\n"
-    await message.answer(text)
+        text += f"• #{p['id']} {p['amount']}₽ — {escape_html(p.get('description', ''))}\n"
+        builder.button(text=f"✅ Я оплатил #{p['id']}", callback_data=f"payment:paid:{p['id']}")
+    builder.adjust(1)
+    await message.answer(text, reply_markup=builder.as_markup())
 @router.callback_query(F.data.startswith("payment:view:"))
 async def view_payment(callback: CallbackQuery):
     pay_id = int(callback.data.split(":")[-1])

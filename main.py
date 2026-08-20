@@ -21,6 +21,7 @@ from handlers import (
     analytics_router,
     mailing_router,
     referral_router,
+    fixes_router,
 )
 async def healthcheck(request):
     return web.Response(text="OK")
@@ -63,6 +64,7 @@ async def main():
     dp.message.middleware(ActivityMiddleware())
     dp.message.middleware(DndMiddleware())
     dp.include_router(admin_router)
+    dp.include_router(fixes_router)
     dp.include_router(booking_router)
     dp.include_router(homework_router)
     dp.include_router(payments_router)

@@ -13,6 +13,7 @@ router = Router()
 class NewMailingFlow(StatesGroup):
     text = State()
     target = State()
+    delay = State()
     confirm = State()
 # =================== СОЗДАТЬ РАССЫЛКУ ===================
 @router.callback_query(F.data == "admin:mail:new")
@@ -42,10 +43,29 @@ async def mailing_target(callback: CallbackQuery, state: FSMContext):
         return
     data = await state.get_data()
     mailing_text = data.get("text", "")
-    # Предпросмотр + подтверждение
     await state.update_data(target=target)
-    await state.set_state(NewMailingFlow.confirm)
+    await state.set_state(NewMailingFlow.delay)
     target_label = "Все ученики" if target == "all" else "Неактивные"
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    for sec in ("0", "1", "3", "5", "10"):
+        builder.button(text=f"⏱ {sec} сек", callback_data=f"mail:delay:{sec}")
+    builder.button(text="❌ Отмена", callback_data="mail:cancel")
+    builder.adjust(3)
+    await callback.message.edit_text(
+        f"📢 <b>Рассылка</b>\n\n"
+        f"📝 Текст:\n{escape_html(mailing_text[:300])}\n\n"
+        f"👥 Цель: {target_label}\n\n"
+        f"Выберите задержку между сообщениями:",
+        reply_markup=builder.as_markup()
+    )
+@router.callback_query(F.data.startswith("mail:delay:"))
+async def mailing_delay(callback: CallbackQuery, state: FSMContext):
+    delay = int(callback.data.split(":")[-1])
+    await state.update_data(delay=delay)
+    await state.set_state(NewMailingFlow.confirm)
+    data = await state.get_data()
+    target_label = "Все ученики" if data.get("target") == "all" else "Неактивные"
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отправить", callback_data="mail:confirm:yes")
@@ -53,17 +73,21 @@ async def mailing_target(callback: CallbackQuery, state: FSMContext):
     builder.adjust(2)
     await callback.message.edit_text(
         f"📢 <b>Предпросмотр рассылки</b>\n\n"
-        f"📝 Текст:\n{escape_html(mailing_text[:500])}\n\n"
-        f"👥 Цель: {target_label}\n\n"
+        f"📝 Текст:\n{escape_html(data.get('text', '')[:500])}\n\n"
+        f"👥 Цель: {target_label}\n"
+        f"⏱ Задержка: {delay} сек\n\n"
         f"Подтвердите отправку:",
         reply_markup=builder.as_markup()
     )
+
+
 @router.callback_query(F.data == "mail:confirm:yes")
 async def mailing_confirm(callback: CallbackQuery, state: FSMContext):
-    """Отправка рассылки с соблюдением лимитов."""
+    """Отправка рассылки (без дневного лимита)."""
     data = await state.get_data()
     text = data.get("text", "")
     target = data.get("target", "all")
+    delay = data.get("delay", 3)
     await state.clear()
     # Получаем список учеников
     all_students = await db.get_all_students()
@@ -74,12 +98,6 @@ async def mailing_confirm(callback: CallbackQuery, state: FSMContext):
     if not students_list:
         await callback.message.edit_text("📭 Нет учеников для рассылки.")
         return
-    # ИСПРАВЛЕНО: проверяем лимит MAX_MAILING_PER_DAY
-    if len(students_list) > config.MAX_MAILING_PER_DAY:
-        students_list = students_list[:config.MAX_MAILING_PER_DAY]
-        logger.warning(
-            f"Mailing truncated to {config.MAX_MAILING_PER_DAY} (MAX_MAILING_PER_DAY)"
-        )
     # Создаём запись в БД
     try:
         cursor = await db.db.execute(
@@ -100,8 +118,7 @@ async def mailing_confirm(callback: CallbackQuery, state: FSMContext):
         try:
             await callback.bot.send_message(student["user_id"], text)
             sent += 1
-            # ИСПРАВЛЕНО: задержка из конфига (было неиспользуемое значение)
-            await asyncio.sleep(config.MAILING_DELAY_SECONDS)
+            await asyncio.sleep(delay)
         except Exception as e:
             logger.warning(f"Mailing failed for {student['user_id']}: {e}")
             errors += 1

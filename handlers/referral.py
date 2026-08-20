@@ -21,37 +21,6 @@ async def referral_info(message: Message):
         f"📊 Приглашено: {stats['total_referrals']}\n"
         f"✅ Активировано: {stats['completed']}"
     )
-# =================== АДМИН: список рефералов ===================
-@router.callback_query(F.data == "admin:referrals")
-async def admin_referrals(callback: CallbackQuery):
-    try:
-        referrals = await db.get_all_referrals()
-        if not referrals:
-            await callback.message.edit_text(
-                "🎁 Рефералов пока нет.",
-                reply_markup=back_button("admin:back"),
-            )
-            return
-        text = f"🎁 <b>Реферальная система</b> (скидка {config.REFERRAL_BONUS_PERCENT}%)\n\n"
-        text += f"Всего рефералов: {len(referrals)}\n\n"
-        for r in referrals[:15]:
-            status_emoji = {"pending": "⏳", "completed": "✅", "expired": "⌛"}
-            referrer = await db.get_student(r["referrer_id"])
-            referred = await db.get_student(r["referred_id"])
-            ref_name = escape_html(referrer["full_name"]) if referrer else "—"
-            rec_name = escape_html(referred["full_name"]) if referred else "—"
-            text += (
-                f"{status_emoji.get(r['status'], '❔')} "
-                f"<code>{r['referral_code']}</code>\n"
-                f"   {ref_name} → {rec_name}\n"
-            )
-        await callback.message.edit_text(
-            text,
-            reply_markup=back_button("admin:back"),
-        )
-    except Exception as e:
-        logger.error(f"Referral list error: {e}")
-        await callback.answer("Ошибка загрузки", show_alert=True)
 # =================== АДМИН: применить бонус ===================
 @router.callback_query(F.data.startswith("admin:referral:bonus:"))
 async def admin_apply_referral_bonus(callback: CallbackQuery):

@@ -380,8 +380,6 @@ async def admin_userbot_menu(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             "👤 <b>Userbot не подключен</b>\n\n"
             "Для рассылки от имени репетитора нужно авторизоваться.\n\n"
-            "⚠️ <b>ВНИМАНИЕ:</b> это нарушает Telegram ToS!\n"
-            "⚠️ Есть риск ПЕРМАНЕНТНОГО БАНА!\n\n"
             "Рекомендация: используйте рассылку от бота (безопасно).",
             reply_markup=builder.as_markup(),
         )
@@ -652,8 +650,6 @@ async def userbot_mail_all(callback: CallbackQuery, state: FSMContext):
         f"💬 Чатов: {len(chat_ids)}\n"
         f"📝 Текст: {escape_html(mail_text[:300])}\n\n"
         f"⏱ Примерное время: ~{len(chat_ids) * 20} сек\n\n"
-        f"⚠️ <b>ВНИМАНИЕ:</b> Нарушение Telegram ToS!\n"
-        f"⚠️ Риск ПЕРМАНЕНТНОГО БАНА!\n\n"
         f"Подтвердите отправку:",
         reply_markup=builder.as_markup(),
     )
@@ -675,8 +671,6 @@ async def userbot_mail_confirm(callback: CallbackQuery, state: FSMContext):
         f"💬 Выбрано чатов: {len(selected)}\n"
         f"📝 Текст: {escape_html(mail_text[:300])}\n\n"
         f"⏱ Примерное время: ~{len(selected) * 20} сек\n\n"
-        f"⚠️ <b>ВНИМАНИЕ:</b> Нарушение Telegram ToS!\n"
-        f"⚠️ Риск ПЕРМАНЕНТНОГО БАНА!\n\n"
         f"Подтвердите отправку:",
         reply_markup=builder.as_markup(),
     )
@@ -734,13 +728,17 @@ async def admin_dnd_enable(callback: CallbackQuery):
     if not await check_admin(callback):
         return
     await db.set_dnd(True)
-    await callback.message.edit_text("✅ DND включён.")
+    from keyboards.common_kb import back_button
+    await callback.message.edit_text("✅ DND включён.", reply_markup=admin_dnd_menu()),
+    reply_markup=back_button("admin:back")
 @router.callback_query(F.data == "admin:dnd:disable")
 async def admin_dnd_disable(callback: CallbackQuery):
     if not await check_admin(callback):
         return
     await db.set_dnd(False)
-    await callback.message.edit_text("🔔 DND выключен.")
+    from keyboards.common_kb import back_button
+    await callback.message.edit_text("🔔 DND выключен.", reply_markup=admin_dnd_menu()),
+    reply_markup=back_button("admin:back")
 # =================== ОПЛАТЫ ===================
 @router.callback_query(F.data == "admin:payments")
 async def admin_payments(callback: CallbackQuery):

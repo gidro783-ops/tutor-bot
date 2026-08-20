@@ -15,7 +15,6 @@ def admin_main_menu() -> InlineKeyboardMarkup:
         ("💳 Оплаты", "admin:payments"),
         ("⭐ Отзывы", "admin:reviews"),
         ("📢 Рассылки", "admin:mailings"),
-        ("❓ FAQ", "admin:faq"),
         ("📊 Аналитика", "admin:analytics"),
         ("🔔 Уведомления", "admin:notifications"),
         ("🔕 Режим DND", "admin:dnd"),
@@ -107,7 +106,7 @@ def admin_mailings_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     buttons = [
         ("📢 Новая рассылка (от бота)", "admin:mail:new"),
-        ("👤 Рассылка от моего имени", "admin:mail:userbot"),  # НОВАЯ КНОПКА
+        ("👤 Рассылка от моего имени", "admin:mail:userbot"),
         ("📋 Рекламные чаты", "admin:mail:chats"),
         ("➕ Добавить чат", "admin:mail:add_chat"),
         ("📊 Статистика рассылок", "admin:mail:stats"),
@@ -122,7 +121,6 @@ def admin_faq_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     buttons = [
         ("📋 Все вопросы", "admin:faq:list"),
-        ("➕ Добавить FAQ", "admin:faq:add"),
         ("◀️ Назад", "admin:back"),
     ]
     for text, callback in buttons:

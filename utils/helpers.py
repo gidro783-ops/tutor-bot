@@ -68,8 +68,8 @@ def is_dnd_active(start_time: str, end_time: str, timezone: str = "Europe/Moscow
 # ============ ВАЛИДАЦИЯ (исправляет отсутствие проверки входных данных) ============
 def validate_phone(phone: str) -> str:
     """Валидация номера телефона."""
-    cleaned = re.sub(r'[\s\-\(\)]', '', phone)
-    if not re.match(r'^[\+]?[0-9]{7,20}$', cleaned):
+    cleaned = re.sub(r'[\s\-\(\)\.]', '', phone)
+    if not re.match(r'^[\+]?[0-9]{5,20}$', cleaned):
         raise ValueError(
             "Неверный формат телефона. Пример: +79991234567"
         )
