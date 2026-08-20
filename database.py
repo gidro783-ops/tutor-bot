@@ -1075,8 +1075,8 @@ class Database:
             await self.db.commit()
         except Exception as e:
             logger.error(f"[log_funnel_event] Failed: {e}")
-        async def get_funnel_stats(self,
-                               period_days: int = 30) -> dict:
+    async def get_funnel_stats(self,
+        period_days: int = 30) -> dict:
         """Статистика воронки за период."""
         try:
             events = [
