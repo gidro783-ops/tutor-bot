@@ -31,11 +31,16 @@ class ReviewText(StatesGroup):
 async def cmd_start(message: Message, state: FSMContext):
     user = message.from_user
     args = message.text.split(" ", 1)
+    
+    # 1. Проверяем, новый ли это ученик
+    existing_student = await db.get_student(user.id)
+    is_new_student = existing_student is None
 
     referrer_id = None
     source = "direct"
+    source_chat_id = None
 
-    # Проверяем реферальную ссылку: /start ref_<user_id>
+    # 2. Парсим аргументы из ссылки
     if len(args) > 1:
         param = args[1]
         if param.startswith("ref_"):
@@ -56,29 +61,33 @@ async def cmd_start(message: Message, state: FSMContext):
             except ValueError:
                 pass
 
-    # Регистрируем ученика
+    # 3. Регистрируем ученика (если его еще нет)
     await db.add_student(
         user_id=user.id,
         full_name=user.full_name or "Без имени",
         username=user.username,
         source=source,
+        source_chat_id=source_chat_id,
         referrer_id=referrer_id
     )
 
     await db.log_funnel_event(user.id, "bot_started", source=source)
 
-    # Если пришёл по реферальной ссылке
-    if referrer_id:
-        referrer = await db.get_student(referrer_id)
+    # 4. Реферальная логика (ТОЛЬКО для новых и не для самого себя)
+    if referrer_id and is_new_student and referrer_id != user.id:
         ref_code = generate_referral_code(user.id)
-        await db.create_referral(referrer_id, user.id, ref_code)
-
-        if referrer:
-            text = Texts.WELCOME_REFERRAL.format(
-                name=user.first_name,
-                referrer=referrer["full_name"],
-                bonus=config.REFERRAL_BONUS_PERCENT
-            )
+        is_new_referral = await db.create_referral(referrer_id, user.id, ref_code)
+        
+        if is_new_referral:
+            referrer = await db.get_student(referrer_id)
+            if referrer:
+                text = Texts.WELCOME_REFERRAL.format(
+                    name=user.first_name,
+                    referrer=referrer["full_name"],
+                    bonus=config.REFERRAL_BONUS_PERCENT
+                )
+            else:
+                text = Texts.WELCOME.format(name=user.first_name)
         else:
             text = Texts.WELCOME.format(name=user.first_name)
     else:
@@ -86,8 +95,6 @@ async def cmd_start(message: Message, state: FSMContext):
 
     await state.clear()
     await message.answer(text, reply_markup=student_main_menu())
-
-
 # =================== ОСНОВНОЕ МЕНЮ ===================
 
 @router.message(F.text == "📅 Записаться на занятие")

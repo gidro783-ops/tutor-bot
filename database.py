@@ -973,8 +973,16 @@ class Database:
 
     async def create_referral(self, referrer_id: int,
                               referred_id: int,
-                              referral_code: str):
+                              referral_code: str) -> bool:
         try:
+            # Защита: проверяем, не был ли этот юзер уже приглашен
+            cursor = await self.db.execute(
+                "SELECT id FROM referrals WHERE referred_id = ?", 
+                (referred_id,)
+            )
+            if await cursor.fetchone():
+                return False  # Такой реферал уже существует
+
             await self.db.execute(
                 """INSERT INTO referrals
                    (referrer_id, referred_id, referral_code)
@@ -982,8 +990,9 @@ class Database:
                 (referrer_id, referred_id, referral_code)
             )
             await self.db.commit()
+            return True
         except Exception:
-            pass
+            return False
 
     async def get_referral_stats(self,
                                  referrer_id: int) -> dict:
