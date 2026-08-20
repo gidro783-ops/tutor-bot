@@ -7,6 +7,7 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from services.userbot import userbot
 
 from config import config
 from database import db
@@ -62,6 +63,11 @@ async def main():
     )
 
     await db.connect()
+     # Подключаем userbot (если есть сохраненная сессия)
+    try:
+        await userbot.connect()
+    except Exception as e:
+        logging.warning(f"Userbot не подключен: {e}"
     logging.info("✅ База данных подключена")
 
     bot = Bot(

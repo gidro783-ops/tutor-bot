@@ -90,6 +90,15 @@ class ABTestSetup(StatesGroup):
     name = State()
     variant_a = State()
     variant_b = State()
+class UserbotLogin(StatesGroup):
+    phone = State()
+    code = State()
+
+class UserbotMailing(StatesGroup):
+    select_chat = State()
+    text = State()
+    schedule_type = State()
+    schedule_time = State()
 
 
 # =================== АВТОРИЗАЦИЯ ===================
@@ -1407,3 +1416,328 @@ async def cancel_action(callback: CallbackQuery, state: FSMContext):
             )
             return
     await callback.message.edit_text("❌ Действие отменено.")
+from services.userbot import userbot
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+import random
+
+
+# =================== USERBOT РАССЫЛКА ===================
+
+@router.callback_query(F.data == "admin:mail:userbot")
+async def admin_userbot_start(callback: CallbackQuery, state: FSMContext):
+    """Начало авторизации личного аккаунта"""
+    if not await check_admin(callback):
+        return
+    
+    # Проверяем, уже авторизован ли аккаунт
+    if userbot.is_connected:
+        await callback.message.edit_text(
+            "✅ Твой личный аккаунт уже подключен!\n\n"
+            "Выбери действие:",
+            reply_markup=get_userbot_menu()
+        )
+        return
+    
+    await state.set_state(UserbotLogin.phone)
+    await callback.message.edit_text(
+        "📱 Введи номер телефона аккаунта репетитора:\n\n"
+        "⚠️ Формат: +79991234567\n\n"
+        "На этот номер придет код подтверждения Telegram."
+    )
+
+
+@router.message(UserbotLogin.phone)
+async def process_userbot_phone(message: Message, state: FSMContext):
+    phone = message.text.strip()
+    if not phone.startswith("+"):
+        await message.answer("❌ Номер должен начинаться с + (например +79991234567):")
+        return
+    
+    # Подключаем клиента если не подключен
+    if not userbot.client:
+        await userbot.connect()
+    
+    # Отправляем код запрос
+    success = await userbot.send_code_request(phone)
+    if success:
+        await state.update_data(phone=phone)
+        await state.set_state(UserbotLogin.code)
+        await message.answer(
+            "📩 Telegram отправил код на этот номер.\n\n"
+            "Введи код (цифры через пробел или слитно):\n\n"
+            "Например: 1 2 3 4 5 или 12345"
+        )
+    else:
+        await message.answer("❌ Ошибка отправки кода. Проверь номер и попробуй снова.")
+
+
+@router.message(UserbotLogin.code)
+async def process_userbot_code(message: Message, state: FSMContext):
+    data = await state.get_data()
+    phone = data["phone"]
+    code = message.text.strip()
+    
+    success = await userbot.sign_in(phone, code)
+    if success:
+        await state.clear()
+        me = await userbot.client.get_me()
+        await message.answer(
+            f"✅ Аккаунт подключен!\n\n"
+            f"👤 Имя: {me.first_name}\n"
+            f"📱 Номер: {phone}\n\n"
+            f"Теперь ты можешь делать рассылку от своего имени.",
+            reply_markup=get_userbot_menu()
+        )
+    else:
+        await message.answer("❌ Неверный код. Попробуй ещё раз:")
+
+
+def get_userbot_menu() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📢 Новая рассылка", callback_data="admin:ub:mailing")
+    builder.button(text="📋 Мои чаты", callback_data="admin:ub:chats")
+    builder.button(text="📊 Активные рассылки", callback_data="admin:ub:active")
+    builder.button(text="🔓 Отключить аккаунт", callback_data="admin:ub:disconnect")
+    builder.button(text="◀️ Назад", callback_data="admin:mailings")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+@router.callback_query(F.data == "admin:ub:mailing")
+async def admin_ub_mailing(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback):
+        return
+    
+    if not userbot.is_connected:
+        await callback.answer("❌ Сначала подключи аккаунт!", show_alert=True)
+        return
+    
+    # Получаем список чатов
+    chats = await userbot.get_chats(limit=20)
+    if not chats:
+        await callback.message.edit_text(
+            "📭 Не найдено групп и каналов.",
+            reply_markup=back_button("admin:mailings")
+        )
+        return
+    
+    # Сохраняем чаты в state
+    await state.update_data(chats=chats)
+    
+    builder = InlineKeyboardBuilder()
+    for chat in chats:
+        title = chat["title"][:30]
+        builder.button(
+            text=f"💬 {title} ({chat['type']})",
+            callback_data=f"ub:chat:{chat['id']}"
+        )
+    builder.button(text="◀️ Назад", callback_data="admin:mailings")
+    builder.adjust(1)
+    
+    await callback.message.edit_text(
+        "💬 Выбери чат для рассылки:",
+        reply_markup=builder.as_markup()
+    )
+
+
+@router.callback_query(F.data.startswith("ub:chat:"))
+async def admin_ub_select_chat(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback):
+        return
+    
+    chat_id = int(callback.data.split(":")[2])
+    data = await state.get_data()
+    chats = data.get("chats", [])
+    chat_name = next(
+        (c["title"] for c in chats if c["id"] == chat_id), "Неизвестно"
+    )
+    
+    await state.update_data(target_chat_id=chat_id, target_chat_name=chat_name)
+    await state.set_state(UserbotMailing.text)
+    
+    await callback.message.edit_text(
+        f"💬 Чат: **{chat_name}**\n\n"
+        f"📝 Введи текст сообщения для рассылки:\n\n"
+        f"⚠️ Советы против бана:\n"
+        f"• Не отправляй одно и то же каждый раз\n"
+        f"• Добавляй эмодзи или меняй слова\n"
+        f"• Не делай текст слишком длинным",
+        parse_mode="Markdown"
+    )
+
+
+@router.message(UserbotMailing.text)
+async def process_ub_mailing_text(message: Message, state: FSMContext):
+    await state.update_data(mailing_text=message.text)
+    await state.set_state(UserbotMailing.schedule_type)
+    
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⏰ Каждый день в определённое время", callback_data="ub:sched:daily")
+    builder.button(text="🔄 Каждый N часов", callback_data="ub:sched:hours")
+    builder.button(text="▶️ Один раз сейчас", callback_data="ub:sched:now")
+    builder.button9(text="❌ Отмена", callback_data="cancel")
+    builder.adjust(1)
+    
+    await message.answer(
+        "📅 Выбери тип расписания:",
+        reply_markup=builder.as_markup()
+    )
+
+
+@router.callback_query(F.data.startswith("ub:sched:"))
+async def admin_ub_schedule(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback):
+        return
+    
+    sched_type = callback.data.split(":")[-1]
+    data = await state.get_data()
+    
+    if sched_type == "now":
+        # Отправить прямо сейчас (с безопасной задержкой)
+        chat_id = data["target_chat_id"]
+        text = data["mailing_text"]
+        
+        await callback.message.edit_text("⏳ Отправка сообщения...")
+        
+        success = await userbot.send_message_safe(chat_id, text)
+        
+        if success:
+            await callback.message.edit_text(
+                "✅ Сообщение отправлено!\n\n"
+                "⏱ Была добавлена случайная задержка для безопасности.",
+                reply_markup=back_button("admin:mailings")
+            )
+        else:
+            await callback.message.edit_text(
+                "❌ Ошибка отправки. Возможно, нет прав писать в этот чат.",
+                reply_markup=back_button("admin:mailings")
+            )
+        await state.clear()
+        return
+    
+    elif sched_type == "daily":
+        await state.set$set_state(UserbotMailing.schedule_time)
+        await callback.message.edit_text(
+            "⏰ Введи время отправки (по Мск) в формате ЧЧ:ММ:\n\n"
+            "Например: 10:00\n\n"
+            "⚠️ Бот добавит случайные 1-15 минут к этому времени\n"
+            "для безопасности от бана."
+        )
+    
+    elif sched_type == "hours":
+        await state.update_data(schedule_type="hours")
+        await state.set_state(UserbotMailing.schedule_time)
+        await callback.message.edit_text(
+            "🔄 Введи интервал в часах:\n\n"
+            "Например: 4 (каждые 4 часа)\n\n"
+            "⚠️ Минимум 2 часа для безопасности!"
+        )
+
+
+@router.message(UserbotMailing.schedule_time)
+async def process_ub_schedule_time(message: Message, state: FSMContext):
+    data = await state.get_data()
+    sched_type = data.get("schedule_type", "daily")
+    
+    if sched_type == "hours":
+        try:
+            hours = float(message.text)
+            if hours < 2:
+                await message.answer("❌ Минимум 2 часа! Введи ещё раз:")
+                return
+        except ValueError:
+            await message.answer("❌ Введи число (например 4):")
+            return
+        
+        # Создаём периодическую задачу
+        chat_id = data["target_chat_id"]
+        chat_name = data["target_chat_name"]
+        text = data["mailing_text"]
+        
+        from services.scheduler import bot_scheduler
+        job_id = f"ub_mail_{chat_id}_{random.randint(1000,9999)}"
+        
+        bot_scheduler.scheduler.add_job(
+            userbot.send_message_safe,
+            trigger="interval",
+            hours=hours,
+            args=[chat_id, text],
+            id=job_id,
+            replace_existing=True,
+            jitter=900  # случайный разброс до 15 минут
+        )
+        
+        await state.clear()
+        await message.answer(
+            f"✅ Рассылка настроена!\n\n"
+            f"💬 Чат: {chat_name}\n"
+            f"🔄 Каждые {hours} часов\n"
+            f"📝 Текст: {text[:50]}...\n\n"
+            f"🛡 Добавлен случайный разброс до 15 минут."
+        )
+    
+    else:  # daily
+        time_str = message.text.strip()
+        try:
+            parts = time_str.split(":")
+            hour = int(parts[0])
+            minute = int(parts[1])
+            if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+                raise ValueError
+        except (ValueError, IndexError):
+            await message.answer("❌ Формат ЧЧ:ММ. Например 10:00:")
+            return
+        
+        chat_id = data["target_chat_id"]
+        chat_name = data["target_chat_name"]
+        text = data["mailing_text"]
+        
+        from services.scheduler import bot_scheduler
+        job_id = f"ub_mail_{chat_id}_{random.randint(1000,9999)}"
+        
+        bot_scheduler.scheduler.add_job(
+            userbot.send_message_safe,
+            trigger="cron",
+            hour=hour,
+            minute=minute,
+            args=[chat_id, text],
+            id=job_id,
+            replace_existing=True,
+            jitter=900  # случайный разброс до 15 минут
+        )
+        
+        await state.clear()
+        await message.answer(
+            f"✅ Рассылка настроена!\n\n"
+            f"💬 Чат: {chat_name}\n"
+            f"⏰ Каждый день в {time_str} (Мск)\n"
+            f"📝 Текст: {text[:50]}...\n\n"
+            f"🛡 Добавлен случайный разброс 1-15 минут."
+        )
+
+
+@router.callback_query(F.data == "admin:ub:chats")
+async def admin_ub_chats(callback: CallbackQuery):
+    if not await check_admin(callback):
+        return
+    chats = await userbot.get_chats()
+    text = "💬 **Твои чаты:**\n\n"
+    for c in chats:
+        text += f"• {c['title']} ({c['type']}) — ID: `{c['id']}`\n"
+    await callback.message.edit_text(
+        text,
+        reply_markup=back_button("admin:mail:userbot"),
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "admin:ub:disconnect")
+async def admin_ub_disconnect(callback: CallbackQuery):
+    if not await check_admin(callback):
+        return
+    await userbot.disconnect()
+    await callback.message.edit_text(
+        "🔓 Аккаунт отключен. Сессия сохранена — в следующий раз "
+        "код не потребуется.",
+        reply_markup=back_button("admin:mailings")
+    )
