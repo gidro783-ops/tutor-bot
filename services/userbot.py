@@ -55,7 +55,7 @@ class UserbotService:
                 await self.client.connect()
             except Exception as e:
                 logger.error(f"Userbot: не удалось создать клиент: {e}")
-                return False!False
+                return False
         try:
             await self.client.send_code_request(phone)
             logger.info(f"Userbot: код отправлен на {phone}")

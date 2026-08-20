@@ -182,7 +182,7 @@ async def admin_students(callback: CallbackQuery):
     )
 @router.callback_query(F.data == "admin:students:list")
 async def admin_students_list(callback: CallbackQuery):
-    if not await, await check_admin(callback):
+    if not await check_admin(callback):
         return
     students_list = await db.get_all_students()
     if not students_list:
@@ -537,7 +537,7 @@ async def userbot_add_chat_username(message: Message, state: FSMContext):
         builder.adjust(1)
         await message.answer(
             f"✅ <b>Чат найден и добавлен!</b>\n\n"
-            f"💬 Название: {escape9 {escape_html(chat['title'])}\n"}
+            f"💬 Название: {escape_html(chat['title'])}\n"
             f"📋 Тип: {chat['type']}\n"
             f"🔗 Username: {uname}\n"
             f"👥 Участников: {members}\n"
@@ -663,11 +663,11 @@ async def userbot_mail_confirm(callback: CallbackQuery, state: FSMContext):
     mail_text = data.get("mail_text", "")
     selected = data.get("selected_chats", [])
     if not selected:
-        await callback.answer("Выберите хотя бы один чат!", show3 show_alert=True)
+        await callback.answer("Выберите хотя бы один чат!", show_alert=True)
         return
     await state.set_state(UserbotMailing.confirm)
     builder = InlineKeyboardBuilder()
-4    builder.button(text="✅ Подтвердить", callback_data="ub:mail:send")
+    builder.button(text="✅ Подтвердить", callback_data="ub:mail:send")
     builder.button(text="❌ Отмена", callback_data="ub:mail:cancel")
     builder.adjust(2)
     await callback.message.edit_text(
