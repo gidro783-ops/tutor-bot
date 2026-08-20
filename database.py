@@ -1075,9 +1075,29 @@ class Database:
             await self.db.commit()
         except Exception as e:
             logger.error(f"[log_funnel_event] Failed: {e}")
-    async def get_funnel_stats(self, period_days: int = 30) -> dict:
-        """Алиас с опечаткой для обратной совместимости."""
-        return await self.get_funnel_stats(period_days)
+        async def get_funnel_stats(self,
+                               period_days: int = 30) -> dict:
+        """Статистика воронки за период."""
+        try:
+            events = [
+                "ad_seen", "bot_started", "trial_booked",
+                "trial_attended", "became_regular"
+            ]
+            stats = {}
+            for event in events:
+                cursor = await self.db.execute(
+                    """SELECT COUNT(DISTINCT user_id) as count
+                       FROM funnel_events
+                       WHERE event_type = ?
+                       AND created_at >= datetime('now', ?)""",
+                    (event, f"-{period_days} days")
+                )
+                row = await cursor.fetchone()
+                stats[event] = row["count"] if row else 0
+            return stats
+        except Exception as e:
+            logger.error(f"[get_funnel_stats] Failed: {e}")
+            return {}
     async def get_chat_performance(self) -> list:
         try:
             cursor = await self.db.execute(
