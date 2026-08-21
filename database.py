@@ -624,17 +624,28 @@ class Database:
         3. Отслеживаются уже отправленные напоминания по минутам
            (колонка reminders_sent, JSON-список), поэтому каждый пункт
            REMINDER_BEFORE_MINUTES (60 и 15) отправляется ровно один раз.
+        4. ИСПРАВЛЕНО (v2): окно теперь [+X-10 мин, +X мин], а не
+           [сейчас, +X мин]. Раньше запись за 1 минуту до занятия
+           попадала сразу во ВСЕ окна, и бот в течение 5 минут
+           присылал подряд «через 60 минут» и «через 15 минут»,
+           хотя до занятия оставалась 1 минута.
         """
         try:
             from zoneinfo import ZoneInfo
             now = datetime.now(ZoneInfo(config.TIMEZONE))
             today = now.date().isoformat()
-            current_time = now.strftime("%H:%M")
-            ahead_dt = now + timedelta(minutes=minutes_ahead)
-            # Если окно пересекает полночь — напоминаний на него нет
-            if ahead_dt.date() != now.date():
+            # Окно шириной 10 минут, нацеленное на момент "+minutes_ahead":
+            # напоминание «за 60 минут» — для занятий, начинающихся
+            # через 50–60 минут; «за 15» — через 5–15 минут.
+            # Запись за 1 минуту до начала не попадает ни в одно окно.
+            window_min = now + timedelta(minutes=minutes_ahead - 10)
+            window_max = now + timedelta(minutes=minutes_ahead)
+            # Окно, пересекающее полночь, не обрабатываем
+            if (window_max.date() != now.date()
+                    or window_min.date() != now.date()):
                 return []
-            ahead_time = ahead_dt.strftime("%H:%M")
+            lower_time = window_min.strftime("%H:%M")
+            upper_time = window_max.strftime("%H:%M")
             cursor = await self.db.execute(
                 """SELECT b.*, ts.date, ts.start_time, ts.end_time,
                           s.name as subject_name,
@@ -647,7 +658,7 @@ class Database:
                    WHERE ts.date = ?
                    AND ts.start_time BETWEEN ? AND ?
                    AND b.status IN ('pending', 'confirmed')""",
-                (today, current_time, ahead_time)
+                (today, lower_time, upper_time)
             )
             rows = await cursor.fetchall()
             result = []

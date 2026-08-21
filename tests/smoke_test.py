@@ -90,38 +90,48 @@ async def main():
     await db.add_subject("Математика", 1500)
     subj = (await db.get_subjects())[0]
 
-    a_start = now + timedelta(minutes=30)
+    a_start = now + timedelta(minutes=55)   # окно «за 60» → [+50, +60]
     await db.add_time_slot(date_str, t(a_start), t(a_start + timedelta(minutes=30)))
-    b_start = now + timedelta(minutes=10)
+    b_start = now + timedelta(minutes=10)   # окно «за 15» → [+5, +15]
     await db.add_time_slot(date_str, t(b_start), t(b_start + timedelta(minutes=30)))
+    c_start = now + timedelta(minutes=1)    # за минуту до начала: ни в одно окно
+    await db.add_time_slot(date_str, t(c_start), t(c_start + timedelta(minutes=30)))
     slots = await db.get_available_slots()
     slot_a = [s for s in slots if s["date"] == date_str and s["start_time"] == t(a_start)][0]
     slot_b = [s for s in slots if s["date"] == date_str and s["start_time"] == t(b_start)][0]
+    slot_c = [s for s in slots if s["date"] == date_str and s["start_time"] == t(c_start)][0]
 
-    print("\n[1] Напоминания (было: не приходили никогда)")
+    print("\n[1] Напоминания (окна [X-10..X], без мгновенного спама)")
     ba = await db.create_booking(111, slot_a["id"], subj["id"], "trial")
     bb = await db.create_booking(111, slot_b["id"], subj["id"], "regular")
+    bc = await db.create_booking(111, slot_c["id"], subj["id"], "regular")
     bkb = await db.get_booking(ba)
     ok("запись создаётся со статусом pending", bkb and bkb["status"] == "pending")
     r60 = await db.get_upcoming_bookings(60)
-    ok("pending-записи попадают в окно 60 минут", ba in {b["id"] for b in r60} and bb in {b["id"] for b in r60})
+    ok("занятие через 55 мин → напоминание «за 60»", ba in {b["id"] for b in r60})
+    ok("занятие через 10 мин НЕ попадает в «за 60» (было: фраза 'через 60 минут' за 10 мин до начала)", bb not in {b["id"] for b in r60})
     r15 = await db.get_upcoming_bookings(15)
-    ok("в окно 15 минут попадает только ближайшее занятие", bb in {b["id"] for b in r15} and ba not in {b["id"] for b in r15})
+    ok("занятие через 10 мин → напоминание «за 15»", bb in {b["id"] for b in r15})
+    ok("занятие через 55 мин НЕ попадает в «за 15»", ba not in {b["id"] for b in r15})
+    ok("кЛЮЧЕВОЕ: запись за 1 минуту до начала → НИ ОДНОГО напоминания (был баг: спам '60/15 минут')",
+       bc not in {b["id"] for b in r60} and bc not in {b["id"] for b in r15})
     await db.mark_reminder_sent(bb, 60)
-    r60b = await db.get_upcoming_bookings(60)
-    ok("60-мин напоминание не дублируется", bb not in {b["id"] for b in r60b})
     r15b = await db.get_upcoming_bookings(15)
-    ok("15-мин напоминание НЕ заблокировано общим флагом (было: не шло)", bb in {b["id"] for b in r15b})
+    ok("15-мин напоминание НЕ блокируется отметкой о 60-мин", bb in {b["id"] for b in r15b})
     await db.mark_reminder_sent(bb, 15)
     r15c = await db.get_upcoming_bookings(15)
     ok("15-мин напоминание отправляется один раз", bb not in {b["id"] for b in r15c})
+    await db.mark_reminder_sent(ba, 60)
+    r60b = await db.get_upcoming_bookings(60)
+    ok("60-мин напоминание не дублируется", ba not in {b["id"] for b in r60b})
 
     print("\n[2] «Мои занятия» (было: пусто, хотя запись есть)")
     vis = visible_bookings(await db.get_student_bookings(111))
-    ok("pending-записи видны ученику", {b["id"] for b in vis} == {ba, bb})
+    ok("pending-записи видны ученику", {b["id"] for b in vis} == {ba, bb, bc})
     await db.cancel_booking(bb, "тест")
     vis2 = visible_bookings(await db.get_student_bookings(111))
-    ok("отменённая запись скрыта", {b["id"] for b in vis2} == {ba})
+    ok("отменённая запись скрыта", {b["id"] for b in vis2} == {ba, bc})
+    ok("ближайшее занятие показывается первым", vis2[0]["id"] == bc)
 
     print("\n[3] Защита от двойного бронирования слота")
     await db.add_student(222, "Второй Ученик")

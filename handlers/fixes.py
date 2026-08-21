@@ -12,6 +12,18 @@ from keyboards.admin_kb import admin_homework_menu, back_button, student_list_ke
 from keyboards.student_kb import my_bookings_keyboard, booking_detail_keyboard
 from utils.helpers import format_date, escape_html
 import logging
+
+# ИСПРАВЛЕНИЕ (v2): SkipHandler нужен, чтобы «выбивать» пользователя
+# из сценария ввода при нажатии другой кнопки/команды.
+try:
+    from aiogram.dispatcher.event.handler import SkipHandler
+except ImportError:  # на случай другой версии aiogram
+    try:
+        from aiogram.exceptions import SkipHandler
+    except ImportError:
+        class SkipHandler(Exception):
+            pass
+
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -34,6 +46,16 @@ async def _set_flow(state: FSMContext, flow: str, step: str, **kw):
     await state.clear()
     await state.set_state(Step.flow)
     await state.update_data(flow=flow, step=step, **kw)
+
+def _cancel_kb():
+    """Кнопка «❌ Отмена» для любого шага ввода."""
+    b = InlineKeyboardBuilder()
+    b.button(text="❌ Отмена", callback_data="cancel")
+    return b.as_markup()
+
+def _cancel_line(text: str) -> str:
+    """Подсказка про выход из ввода в подсказках."""
+    return text + "\n\n(«отмена» — выйти из ввода)"
 
 # ===== ОБЩАЯ ОТМЕНА =====
 @router.callback_query(F.data == "cancel")
@@ -66,7 +88,10 @@ async def sched_week(cb: CallbackQuery, state: FSMContext):
 async def slot_add(cb: CallbackQuery, state: FSMContext):
     if not await _adm(cb): return
     await _set_flow(state, "slot", "date")
-    await cb.message.edit_text("➕ <b>Добавить слот</b>\n\nВведите дату (ГГГГ-ММ-ДД, например 2026-09-01):")
+    await cb.message.edit_text(
+        _cancel_line("➕ <b>Добавить слот</b>\n\nВведите дату (ГГГГ-ММ-ДД, например 2026-09-01):"),
+        reply_markup=_cancel_kb()
+    )
 
 @router.callback_query(F.data == "admin:schedule:recurring")
 async def sched_rec(cb: CallbackQuery, state: FSMContext):
@@ -94,7 +119,10 @@ async def sched_rec(cb: CallbackQuery, state: FSMContext):
 async def rec_add(cb: CallbackQuery, state: FSMContext):
     if not await _adm(cb): return
     await _set_flow(state, "rec", "weekday")
-    await cb.message.edit_text("🔄 День недели (0-6, 0=Пн ... 6=Вс):")
+    await cb.message.edit_text(
+        _cancel_line("🔄 День недели (0-6, 0=Пн ... 6=Вс):"),
+        reply_markup=_cancel_kb()
+    )
 
 @router.callback_query(F.data == "admin:schedule:block")
 async def sched_block(cb: CallbackQuery, state: FSMContext):
@@ -419,7 +447,33 @@ async def pay_paid(cb: CallbackQuery):
 async def step_input(message: Message, state: FSMContext):
     data = await state.get_data()
     flow, step = data.get("flow"), data.get("step")
-    v = message.text.strip()
+    v = (message.text or "").strip()
+    low = v.lower()
+
+    # ===== ИСПРАВЛЕНИЕ (v2): ВЫХОД ИЗ СЦЕНАРИЯ ВВОДА =====
+    # Раньше: открыв ввод (например «Повторяющиеся слоты»), нельзя было
+    # выйти — бот ждал дату/время, а нажатия других кнопок «глотались».
+    # Теперь:
+    #  - «отмена»/«cancel»/кнопка «❌ Отмена» → просто выходим из ввода;
+    #  - любая команда (/start, /admin ...) или кнопка главного меню →
+    #    ввод сбрасывается и выполняется ТОЛЬКО вторая нажатая кнопка
+    #    (событие передаётся дальше следующим обработчикам).
+    CANCEL_WORDS = {"❌ отмена", "отмена", "отменить", "cancel"}
+    MENU_BUTTONS = {
+        "📅 записаться на занятие", "📋 мои занятия", "📝 домашние задания",
+        "💳 оплата", "❓ faq", "🎁 пригласить друга", "👤 мой профиль",
+        "📞 связаться с репетитором",
+    }
+    if low in CANCEL_WORDS or v == "/cancel":
+        await state.clear()
+        await message.answer(
+            "❌ Ввод отменён.\n"
+            "Нажмите нужный пункт меню."
+        )
+        return
+    if low in MENU_BUTTONS or v.startswith("/"):
+        await state.clear()
+        raise SkipHandler()
 
     if flow == "slot":
         if step == "date":
@@ -429,7 +483,7 @@ async def step_input(message: Message, state: FSMContext):
                 await message.answer("❌ Формат ГГГГ-ММ-ДД (например 2026-09-01):")
                 return
             await state.update_data(step="start", date=v)
-            await message.answer("🕐 Время начала (ЧЧ:ММ):")
+            await message.answer(_cancel_line("🕐 Время начала (ЧЧ:ММ):"), reply_markup=_cancel_kb())
             return
         if step == "start":
             try:
@@ -438,7 +492,7 @@ async def step_input(message: Message, state: FSMContext):
                 await message.answer("❌ Формат ЧЧ:ММ (например 15:00):")
                 return
             await state.update_data(step="end", start=v)
-            await message.answer("🕐 Время окончания (ЧЧ:ММ):")
+            await message.answer(_cancel_line("🕐 Время окончания (ЧЧ:ММ):"), reply_markup=_cancel_kb())
             return
         if step == "end":
             try:
@@ -467,7 +521,7 @@ async def step_input(message: Message, state: FSMContext):
                 await message.answer("❌ Число 0-6 (0=Пн ... 6=Вс):")
                 return
             await state.update_data(step="start", weekday=d)
-            await message.answer("🕐 Время начала (ЧЧ:ММ):")
+            await message.answer(_cancel_line("🕐 Время начала (ЧЧ:ММ):"), reply_markup=_cancel_kb())
             return
         if step == "start":
             try:
@@ -476,7 +530,7 @@ async def step_input(message: Message, state: FSMContext):
                 await message.answer("❌ Формат ЧЧ:ММ:")
                 return
             await state.update_data(step="end", start=v)
-            await message.answer("🕐 Время окончания (ЧЧ:ММ):")
+            await message.answer(_cancel_line("🕐 Время окончания (ЧЧ:ММ):"), reply_markup=_cancel_kb())
             return
         if step == "end":
             try:

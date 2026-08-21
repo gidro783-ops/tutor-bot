@@ -2,3 +2,4 @@ venv/
 __pycache__/
 *.db
 .env
+__backup_before_fix_*
