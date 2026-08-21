@@ -1,15 +1,19 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
-Смоук-тест исправлений tutor-bot.
+Смоук-тест tutor-bot (ИСПРАВЛЕННАЯ ВЕРСИЯ v11).
+
 Запуск (без aiogram, без интернет-вызовов, на отдельной тестовой БД):
-    python3 tests/smoke_test.py
+    python tests/smoke_test.py
+    # или: make test
+
 Проверяет: напоминания, «Мои занятия», двойное бронирование,
-оплату «Я оплатил», DND с таймзоной, утреннюю сводку.
+оплату «Я оплатил», DND с таймзоной, утреннюю сводку, FSM-регрессию.
 """
 import sys, os, asyncio, sqlite3, tempfile, types
 from datetime import datetime, timedelta
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# tempfile вместо /tmp — кроссплатформенно (Windows, Linux, macOS)
 TEST_DB = os.path.join(tempfile.gettempdir(), "tbtest_tutor.db")
 
 os.environ["ADMIN_PASSWORD"] = os.environ.get("ADMIN_PASSWORD", "testpass123")
@@ -74,23 +78,32 @@ from utils.helpers import visible_bookings  # noqa: E402
 from datetime import datetime, timedelta  # noqa: E402
 
 PASS = 0
-
-# Регрессия aiogram-FSM: State("cancel") в имени группы превращает
-# callback_data "cancel" в "cancel:", и хэндлер F.data == "cancel" его не ловит.
-from aiogram.fsm.state import State, StatesGroup
-
-class Step(StatesGroup):
-    cancel = State("cancel")
-
-assert "cancel:" in Step.cancel.resolve(), "ожидался resolve() == 'Step:cancel'"
-ok("aiogram FSM: state resolve содержит ':' (StateGroup)", "Step:cancel" == Step.cancel.resolve())
-
-_cq = CallbackQuery.from_user.__self__  # noqa: F841 - sanity: модуль импортируется
 def ok(name, cond):
     global PASS
     assert cond, f"FAILED: {name}"
     PASS += 1
     print(f"  ✓ {name}")
+
+# --- Регрессия FSM: имя состояния НЕ должно совпадать с callback_data ---
+# В aiogram 3 State внутри StatesGroup получает имя "Группа:состояние".
+# Если бы callback_data совпадал с именем состояния, фильтр
+# F.data == "cancel" перестал бы ловить нажатие — ровно тот баг,
+# из-за которого кнопка «❌ Отмена» «не работала».
+try:
+    from aiogram.fsm.state import State, StatesGroup
+
+    class _CancelProbe(StatesGroup):
+        cancel = State("cancel")
+
+    _cb_data = "cancel"
+    _state_name = _CancelProbe.cancel.state  # -> "_CancelProbe:cancel"
+    ok(
+        "FSM: имя состояния ≠ callback_data (кнопка «Отмена» не конфликтует со state)",
+        _state_name != _cb_data and _state_name.endswith(":cancel"),
+    )
+except ImportError:
+    print("  ~ aiogram не установлен — FSM-проверка пропущена")
+
 
 async def main():
     await db.connect()
@@ -121,11 +134,11 @@ async def main():
     ok("запись создаётся со статусом pending", bkb and bkb["status"] == "pending")
     r60 = await db.get_upcoming_bookings(60)
     ok("занятие через 55 мин → напоминание «за 60»", ba in {b["id"] for b in r60})
-    ok("занятие через 10 мин НЕ попадает в «за 60» (было: фраза 'через 60 минут' за 10 мин до начала)", bb not in {b["id"] for b in r60})
+    ok("занятие через 10 мин НЕ попадает в «за 60»", bb not in {b["id"] for b in r60})
     r15 = await db.get_upcoming_bookings(15)
     ok("занятие через 10 мин → напоминание «за 15»", bb in {b["id"] for b in r15})
     ok("занятие через 55 мин НЕ попадает в «за 15»", ba not in {b["id"] for b in r15})
-    ok("кЛЮЧЕВОЕ: запись за 1 минуту до начала → НИ ОДНОГО напоминания (был баг: спам '60/15 минут')",
+    ok("запись за 1 минуту до начала → НИ ОДНОГО напоминания",
        bc not in {b["id"] for b in r60} and bc not in {b["id"] for b in r15})
     await db.mark_reminder_sent(bb, 60)
     r15b = await db.get_upcoming_bookings(15)
@@ -137,7 +150,7 @@ async def main():
     r60b = await db.get_upcoming_bookings(60)
     ok("60-мин напоминание не дублируется", ba not in {b["id"] for b in r60b})
 
-    print("\n[2] «Мои занятия» (было: пусто, хотя запись есть)")
+    print("\n[2] «Мои занятия»")
     vis = visible_bookings(await db.get_student_bookings(111))
     ok("pending-записи видны ученику", {b["id"] for b in vis} == {ba, bb, bc})
     await db.cancel_booking(bb, "тест")
@@ -159,14 +172,14 @@ async def main():
     p1 = await db.get_payment_by_id(pid)
     ok("повторное нажатие 'Я оплатил' игнорируется",
        p1["status"] == "reported" and not await db.report_payment_paid(pid))
-    ok("reported-счёт больше не в 'ожидает оплаты' (конец спама напоминаниями)",
+    ok("reported-счёт больше не в 'ожидает оплаты'",
        pid not in {x["id"] for x in await db.get_pending_payments()})
     ok("reported-счёт виден репетитору", pid in {x["id"] for x in await db.get_reported_payments()})
     await db.confirm_payment(pid, method="admin_confirmed")
     ok("репетитор подтвердил → paid", (await db.get_payment_by_id(pid))["status"] == "paid")
     ok("счёт в истории оплат", pid in {x["id"] for x in await db.get_all_payments()})
 
-    print("\n[5] DND: таймзона (было: окно по UTC сервера, DND 'не работал')")
+    print("\n[5] DND: таймзона")
     await db.set_dnd(True)
     await db.set_setting("dnd_start", t(now - timedelta(hours=1)))
     await db.set_setting("dnd_end", t(now + timedelta(hours=1)))
@@ -184,4 +197,6 @@ async def main():
     await db.close()
     print(f"\n✅ ВСЕ {PASS} ПРОВЕРОК ПРОЙДЕНО")
 
-asyncio.run(main())
+
+if __name__ == "__main__":
+    asyncio.run(main())
