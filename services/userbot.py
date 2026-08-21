@@ -134,7 +134,9 @@ class UserbotService:
         except Exception as e:
             logger.error(f"Userbot: ошибка поиска @{clean_username}: {e}")
             return None
-    async def send_message_safe(self, chat_id: int, text: str) -> bool:
+    async def send_message_safe(self, chat_id: int, text: str,
+                                min_delay: float = 5.0,
+                                max_delay: float = 30.0) -> bool:
         """Безопасная отправка сообщения с рандомной задержкой.
 
         ИСПРАВЛЕНО: обрабатываем FloodWaitError (лимит Telegram) —
@@ -147,8 +149,9 @@ class UserbotService:
         except ImportError:
             FloodWaitError = None
         try:
-            delay = random.uniform(5, 30)
-            await asyncio.sleep(delay)
+            if max_delay > 0:
+                delay = random.uniform(min_delay, max_delay)
+                await asyncio.sleep(delay)
             try:
                 await self.client.send_message(chat_id, text)
             except FloodWaitError as e:
@@ -180,7 +183,10 @@ class UserbotService:
         errors_list = []
         total = len(chat_ids)
         for i, chat_id in enumerate(chat_ids):
-            result = await self.send_message_safe(chat_id, text)
+            jitter = min(5.0, delay_between / 4) if delay_between > 0 else 0
+            result = await self.send_message_safe(
+                chat_id, text, min_delay=0, max_delay=jitter
+            )
             if result:
                 sent += 1
             else:

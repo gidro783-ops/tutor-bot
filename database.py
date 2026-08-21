@@ -23,9 +23,78 @@ class Database:
         await self.db.execute("PRAGMA journal_mode=WAL")
         await self.db.execute("PRAGMA foreign_keys=ON")
         await self._create_tables()
+        await self._migrate()
     async def close(self):
         if self.db:
             await self.db.close()
+    async def _migrate(self):
+        # Автомиграция: добавляет колонки, которых нет в старой базе
+        expected = {
+            "students": {
+                "phone": "TEXT", "email": "TEXT", "source": "TEXT DEFAULT 'direct'",
+                "source_chat_id": "INTEGER", "referrer_id": "INTEGER",
+                "is_active": "INTEGER NOT NULL DEFAULT 1", "last_activity": "TEXT",
+                "total_lessons": "INTEGER DEFAULT 0", "notes": "TEXT DEFAULT ''",
+            },
+            "admin_sessions": {
+                "auth_time": "TEXT", "session_expires": "TEXT",
+                "failed_attempts": "INTEGER DEFAULT 0", "locked_until": "TEXT",
+            },
+            "time_slots": {
+                "is_recurring": "INTEGER NOT NULL DEFAULT 0",
+                "recurring_day": "INTEGER",
+                "slot_type": "TEXT DEFAULT 'regular'",
+                "version": "INTEGER DEFAULT 0",
+            },
+            "bookings": {
+                "subject_id": "INTEGER", "confirmed_at": "TEXT", "cancelled_at": "TEXT",
+                "cancel_reason": "TEXT", "reminder_sent": "INTEGER DEFAULT 0",
+                "notes": "TEXT DEFAULT ''",
+            },
+            "homework": {
+                "subject_id": "INTEGER", "file_ids": "TEXT DEFAULT '[]'",
+                "due_date": "TEXT", "grade": "TEXT", "feedback": "TEXT",
+                "submitted_at": "TEXT", "submitted_file_ids": "TEXT DEFAULT '[]'",
+            },
+            "payments": {
+                "payment_method": "TEXT", "paid_at": "TEXT",
+                "reminder_count": "INTEGER DEFAULT 0", "last_reminder": "TEXT",
+            },
+            "reviews": {"booking_id": "INTEGER", "is_published": "INTEGER DEFAULT 0"},
+            "mailings": {
+                "target_chat_ids": "TEXT DEFAULT '[]'", "sent_at": "TEXT",
+                "total_sent": "INTEGER DEFAULT 0", "total_errors": "INTEGER DEFAULT 0",
+            },
+            "ad_chats": {
+                "chat_title": "TEXT DEFAULT ''", "is_active": "INTEGER DEFAULT 1",
+                "total_leads": "INTEGER DEFAULT 0", "last_mailing": "TEXT",
+            },
+            "referrals": {"status": "TEXT DEFAULT 'pending'", "bonus_applied": "INTEGER DEFAULT 0"},
+            "funnel_events": {
+                "source": "TEXT", "source_chat_id": "INTEGER",
+                "metadata": "TEXT DEFAULT '{}'",
+            },
+        }
+        for table, columns in expected.items():
+            try:
+                cursor = await self.db.execute(f"PRAGMA table_info({table})")
+                rows = await cursor.fetchall()
+                if not rows:
+                    continue
+                existing = {r[1] for r in rows}
+                for col, decl in columns.items():
+                    if col not in existing:
+                        try:
+                            await self.db.execute(
+                                f"ALTER TABLE {table} ADD COLUMN {col} {decl}"
+                            )
+                            logger.info(f"[migrate] {table}: добавлена колонка {col}")
+                        except Exception as e:
+                            logger.warning(f"[migrate] {table}.{col}: {e}")
+                await self.db.commit()
+            except Exception as e:
+                logger.warning(f"[migrate] Не удалось проверить {table}: {e}")
+
     async def _create_tables(self):
         await self.db.executescript("""
             CREATE TABLE IF NOT EXISTS students (

@@ -640,6 +640,8 @@ async def userbot_mail_all(callback: CallbackQuery, state: FSMContext):
     chat_map = data.get("chat_map", {})
     chat_ids = list(chat_map.keys())
     await state.update_data(selected_chats=chat_ids)
+    await _show_delay_choice(callback, len(chat_ids), mail_text)
+    return
     await state.set_state(UserbotMailing.confirm)
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Подтвердить", callback_data="ub:mail:send")
@@ -653,7 +655,79 @@ async def userbot_mail_all(callback: CallbackQuery, state: FSMContext):
         f"Подтвердите отправку:",
         reply_markup=builder.as_markup(),
     )
+UB_DELAYS = [
+    ("⚡ 10 сек", 10),
+    ("🚶 30 сек", 30),
+    ("🕐 1 мин", 60),
+    ("🕔 5 мин", 300),
+    ("🕝 15 мин", 900),
+    ("🕧 30 мин", 1800),
+    ("🐢 1 час", 3600),
+    ("🐌 2 часа", 7200),
+]
+def _fmt_delay(sec: int) -> str:
+    if sec >= 3600:
+        return f"{sec / 3600:g} ч"
+    if sec >= 60:
+        return f"{sec // 60} мин"
+    return f"{sec} сек"
+def _fmt_eta(total_sec: int) -> str:
+    if total_sec >= 3600:
+        return f"~{total_sec / 3600:.1f} ч"
+    if total_sec >= 60:
+        return f"~{total_sec // 60} мин"
+    return f"~{total_sec} сек"
+async def _show_delay_choice(callback: CallbackQuery, count: int, mail_text: str):
+    builder = InlineKeyboardBuilder()
+    for label, sec in UB_DELAYS:
+        builder.button(text=label, callback_data=f"ub:delay:{sec}")
+    builder.button(text="❌ Отмена", callback_data="ub:mail:cancel")
+    builder.adjust(2)
+    await callback.message.edit_text(
+        f"📢 <b>Рассылка от имени репетитора</b>\n\n"
+        f"💬 Выбрано чатов: {count}\n"
+        f"📝 Текст: {escape_html(mail_text[:200])}\n\n"
+        f"⏱ <b>Выберите задержку между сообщениями:</b>\n"
+        f"Чем больше пауза — тем ниже риск бана аккаунта.\n"
+        f"Для безопасности рекомендуется от 15 минут.",
+        reply_markup=builder.as_markup(),
+    )
+
 @router.callback_query(F.data == "ub:mail:confirm")
+async def userbot_mail_confirm(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    mail_text = data.get("mail_text", "")
+    selected = data.get("selected_chats", [])
+    if not selected:
+        await callback.answer("Выберите хотя бы один чат!", show_alert=True)
+        return
+    await _show_delay_choice(callback, len(selected), mail_text)
+
+
+@router.callback_query(F.data.startswith("ub:delay:"))
+async def userbot_choose_delay(callback: CallbackQuery, state: FSMContext):
+    delay = int(callback.data.split(":")[-1])
+    await state.update_data(ub_delay=delay)
+    await state.set_state(UserbotMailing.confirm)
+    data = await state.get_data()
+    mail_text = data.get("mail_text", "")
+    selected = data.get("selected_chats", [])
+    eta = _fmt_eta(max(0, len(selected) - 1) * delay)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Подтвердить", callback_data="ub:mail:send")
+    builder.button(text="⏱ Другая задержка", callback_data="ub:mail:confirm")
+    builder.button(text="❌ Отмена", callback_data="ub:mail:cancel")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        f"📢 <b>Рассылка от имени репетитора</b>\n\n"
+        f"💬 Чатов: {len(selected)}\n"
+        f"📝 Текст: {escape_html(mail_text[:300])}\n"
+        f"⏱ Задержка: <b>{_fmt_delay(delay)}</b> между сообщениями\n"
+        f"🕓 Общее время: {eta}\n\n"
+        f"Подтвердите отправку:",
+        reply_markup=builder.as_markup(),
+    )
+
 async def userbot_mail_confirm(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     mail_text = data.get("mail_text", "")
@@ -679,6 +753,7 @@ async def userbot_mail_send(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     mail_text = data.get("mail_text", "")
     chat_ids = data.get("selected_chats", [])
+    delay = data.get("ub_delay", 30)
     await state.clear()
     if not chat_ids or not mail_text:
         await callback.message.edit_text("❌ Нет данных для рассылки.")
@@ -691,7 +766,7 @@ async def userbot_mail_send(callback: CallbackQuery, state: FSMContext):
     result = await userbot.send_mailing_to_chats(
         chat_ids=chat_ids,
         text=mail_text,
-        delay_between=10.0,
+        delay_between=float(delay),
     )
     sent = result["sent"]
     errors = result["errors"]
