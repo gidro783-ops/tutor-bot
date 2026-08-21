@@ -74,6 +74,18 @@ from utils.helpers import visible_bookings  # noqa: E402
 from datetime import datetime, timedelta  # noqa: E402
 
 PASS = 0
+
+# Регрессия aiogram-FSM: State("cancel") в имени группы превращает
+# callback_data "cancel" в "cancel:", и хэндлер F.data == "cancel" его не ловит.
+from aiogram.fsm.state import State, StatesGroup
+
+class Step(StatesGroup):
+    cancel = State("cancel")
+
+assert "cancel:" in Step.cancel.resolve(), "ожидался resolve() == 'Step:cancel'"
+ok("aiogram FSM: state resolve содержит ':' (StateGroup)", "Step:cancel" == Step.cancel.resolve())
+
+_cq = CallbackQuery.from_user.__self__  # noqa: F841 - sanity: модуль импортируется
 def ok(name, cond):
     global PASS
     assert cond, f"FAILED: {name}"

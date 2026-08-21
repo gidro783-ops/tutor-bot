@@ -1,4 +1,4 @@
-from aiogram import Router, F
+﻿from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
@@ -10,9 +10,11 @@ from keyboards.student_kb import (
 from utils.texts import Texts
 from utils.helpers import generate_referral_code, escape_html, format_date, validate_phone
 from config import config
+from utils.fsm_guard import FsmGuard
 import logging
 logger = logging.getLogger(__name__)
 router = Router()
+router.message.middleware(FsmGuard())
 
 class ContactInfo(StatesGroup):
     phone = State()

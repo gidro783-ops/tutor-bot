@@ -187,7 +187,13 @@ class UserbotService:
             logger.info("Userbot: у аккаунта включён двухступенчатый пароль")
             return False, "PASSWORD"
         except PhoneCodeInvalidError:
-            return False, "Код неверен или истёк (живёт ~5 минут). Введите код из Telegram ещё раз:"
+            return False, (
+                "Код не подошёл. Проверьте:\n"
+                "— не перепутан ли порядок (Telegram шлёт 5 цифр);\n"
+                "— не истёк ли (живёт ~5 минут, затем просите новый);\n"
+                "— не осталась ли активна старая сессия (нажмите «🔌 Отключить» и начните заново).\n"
+                "Введите код ещё раз:"
+            )
         except FloodWaitError as e:
             return False, f"Слишком много попыток — подождите {e.seconds} с."
         except Exception as e:

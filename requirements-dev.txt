@@ -1,5 +1,5 @@
 -r requirements.txt
 
-# Инструменты разработки (в продакшн не ставятся)
+# Development tools only (not installed in production)
 ruff==0.6.9
 pytest==8.3.3

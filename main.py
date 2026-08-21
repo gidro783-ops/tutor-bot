@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import logging
 import os
 import sys
@@ -11,6 +11,7 @@ from config import config
 from database import db
 from services.scheduler import BotScheduler
 from middlewares.auth import DndMiddleware, ActivityMiddleware
+from middlewares.error_handler import ErrorHandlerMiddleware
 from handlers import (
     admin_router,
     student_router,
@@ -63,6 +64,7 @@ async def main():
     dp = Dispatcher()
     dp.message.middleware(ActivityMiddleware())
     dp.message.middleware(DndMiddleware())
+    dp.errors.middleware(ErrorHandlerMiddleware())
     dp.include_router(admin_router)
     dp.include_router(fixes_router)
     dp.include_router(booking_router)

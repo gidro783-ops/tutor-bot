@@ -1,11 +1,11 @@
-# Railway: сборка через Nixpacks (Python определяется автоматически из
-# requirements.txt + .python-version), старт и healthcheck бота.
+# Railway: Nixpacks build (Python is auto-detected from
+# requirements.txt + .python-version), start command and healthcheck.
 [build]
 builder = "NIXPACKS"
 
 [deploy]
 startCommand = "python main.py"
-# В main.py уже поднят HTTP-сервер: GET /health -> "OK" (порт $PORT от Railway)
+# main.py already runs an HTTP server: GET /health -> "OK" (binds $PORT)
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
