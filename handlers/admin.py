@@ -417,10 +417,13 @@ async def userbot_login_env_phone(callback: CallbackQuery, state: FSMContext):
     phone = userbot.phone
     ok, err = await userbot.send_code_request(phone)
     if ok:
-        await state.update_data(phone=phone)
+        await state.update_data(
+            phone=phone,
+            phone_code_hash=userbot.phone_code_hash
+        )
         await state.set_state(UserbotLogin.code)
         await callback.message.edit_text(
-            f"📩 Код отправлен на <code>{phone}</code>\n\nВведите код подтверждения:"
+            f"📩 Код отправлен в Telegram на <code>{phone}</code>\n\nВведите код подтверждения:"
         )
     else:
         # v3: показываем реальную причину, а не «Ошибка отправки кода»
@@ -444,9 +447,15 @@ async def userbot_login_phone(message: Message, state: FSMContext):
         phone = "+" + digits
     ok, err = await userbot.send_code_request(phone)
     if ok:
-        await state.update_data(phone=phone)
+        await state.update_data(
+            phone=phone,
+            phone_code_hash=userbot.phone_code_hash
+        )
         await state.set_state(UserbotLogin.code)
-        await message.answer(f"📩 Код отправлен на {phone}\n\nВведите код:")
+        await message.answer(
+            f"📩 Код отправлен в Telegram на номер {phone}\n\n"
+            f"Введите 5-значный код подтверждения:"
+        )
     else:
         # v3: реальная причина ошибки + можно попробовать снова
         await message.answer(f"❌ {escape_html(err)}\n\nВведите номер ещё раз:")
@@ -454,8 +463,12 @@ async def userbot_login_phone(message: Message, state: FSMContext):
 async def userbot_login_code(message: Message, state: FSMContext):
     data = await state.get_data()
     phone = data.get("phone", "")
-    code = message.text.strip()
-    ok, err = await userbot.sign_in(phone, code)
+    phone_code_hash = data.get("phone_code_hash") or userbot.phone_code_hash
+    raw = (message.text or "").strip()
+    # Извлекаем только цифры (на случай пробелов, дефисов или текста)
+    digits = "".join(c for c in raw if c.isdigit())
+    code = digits if len(digits) >= 5 else raw
+    ok, err = await userbot.sign_in(phone, code, phone_code_hash=phone_code_hash)
     if ok:
         await state.clear()
         me = None

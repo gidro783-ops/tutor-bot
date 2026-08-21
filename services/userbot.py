@@ -39,7 +39,11 @@ class UserbotService:
                 self.session_name,
                 self.api_id,
                 self.api_hash,
-                system_version="4.16.30-vxCUSTOM"
+                system_version="4.16.30-vxCUSTOM",
+                device_model="Desktop",
+                app_version="1.0",
+                lang_code="en",
+                system_lang_code="en-US",
             )
             await self.client.connect()
             if await self.client.is_user_authorized():
@@ -61,7 +65,11 @@ class UserbotService:
             self.session_name,
             self.api_id,
             self.api_hash,
-            system_version="4.16.30-vxCUSTOM"
+            system_version="4.16.30-vxCUSTOM",
+            device_model="Desktop",
+            app_version="1.0",
+            lang_code="en",
+            system_lang_code="en-US",
         )
 
     def session_exists(self) -> bool:
@@ -155,17 +163,19 @@ class UserbotService:
             err = f"{type(e).__name__}: {e}"
             logger.error(f"Userbot: ошибка отправки кода на {phone}: {err}")
             return False, err
-    async def sign_in(self, phone: str, code: str) -> Tuple[bool, str]:
+    async def sign_in(self, phone: str, code: str,
+                      phone_code_hash: Optional[str] = None) -> Tuple[bool, str]:
         """Входим по коду. ИСПРАВЛЕНО (v3): возвращает (ok, ошибка).
         v3.2: используем phone_code_hash из send_code_request — иначе
         Telegram чаще всего отвечает PhoneCodeExpiredError даже на
         корректный свежий код."""
         if not self.client:
             return False, "Клиент не инициализирован"
+        code_hash = phone_code_hash or self.phone_code_hash
         try:
-            if self.phone_code_hash:
+            if code_hash:
                 await self.client.sign_in(
-                    phone, code, phone_code_hash=self.phone_code_hash
+                    phone, code, phone_code_hash=code_hash
                 )
             else:
                 await self.client.sign_in(phone, code)
