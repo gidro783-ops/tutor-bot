@@ -8,7 +8,7 @@ from telethon.tl.types import Chat, Channel
 from telethon.errors import (
     UsernameInvalidError, UsernameNotOccupiedError,
     SessionPasswordNeededError, PhoneCodeInvalidError,
-    PhoneBannedError, FloodWaitError,
+    FloodWaitError, RPCError,
 )
 logger = logging.getLogger(__name__)
 
@@ -131,8 +131,15 @@ class UserbotService:
             return True, ""
         except FloodWaitError as e:
             return False, f"Слишком много попыток — Telegram просит подождать {e.seconds} с."
-        except PhoneBannedError:
-            return False, "Этот номер забанен в Telegram."
+        except RPCError as e:
+            # v3.1: PhoneBannedError в Telethon 1.36 нет; ловим все RPC-ошибки
+            # и достаём вменяемое «PHONE_NUMBER_BANNED» из строки ошибки
+            txt = str(e)
+            if "BANNED" in txt.upper():
+                return False, "Этот номер забанен в Telegram."
+            err = f"{type(e).__name__}: {txt}"
+            logger.error(f"Userbot: ошибка отправки кода на {phone}: {err}")
+            return False, err
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             logger.error(f"Userbot: ошибка отправки кода на {phone}: {err}")
