@@ -2,11 +2,21 @@ import os
 import asyncio
 import logging
 import random
-from typing import Optional
+from typing import Optional, Tuple
 from telethon import TelegramClient
 from telethon.tl.types import Chat, Channel
-from telethon.errors import UsernameInvalidError, UsernameNotOccupiedError
+from telethon.errors import (
+    UsernameInvalidError, UsernameNotOccupiedError,
+    SessionPasswordNeededError, PhoneCodeInvalidError,
+    PhoneBannedError, FloodWaitError,
+)
 logger = logging.getLogger(__name__)
+
+def normalize_phone(phone: str) -> str:
+    """Возвращает номер в виде '+<цифры>' для сравнения.
+    '+1 (555) 123-4567' → '+15551234567', '+79991234567' → '+79991234567'."""
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    return ("+" + digits) if digits else ""
 class UserbotService:
     def __init__(self):
         self.api_id = int(os.getenv("TELEGRAM_API_ID", "0"))
@@ -42,41 +52,128 @@ class UserbotService:
         except Exception as e:
             logger.error(f"Userbot: ошибка подключения: {e}")
             return False
-    async def send_code_request(self, phone: str) -> bool:
-        """Отправляем код подтверждения на номер телефона."""
+    def _fresh_client(self) -> TelegramClient:
+        return TelegramClient(
+            self.session_name,
+            self.api_id,
+            self.api_hash,
+            system_version="4.16.30-vxCUSTOM"
+        )
+
+    def session_exists(self) -> bool:
+        return os.path.exists(self.session_name + ".session")
+
+    async def current_account_phone(self) -> Optional[str]:
+        """Номер текущего (если есть) подключённого аккаунта."""
+        if not self.client or not self.is_connected:
+            return None
+        try:
+            me = await self.client.get_me()
+            return normalize_phone(me.phone or "")
+        except Exception:
+            return None
+
+    async def reset_session(self) -> bool:
+        """ИСПРАВЛЕНИЕ (v3): полное отвязывание аккаунта.
+
+        Раньше «🔌 Отключить» закрывал только соединение, а файл сессии
+        data/tutor_userbot_session.* оставался с авторизацией СТАРОГО
+        аккаунта. Из-за этого новый номер (например, американский)
+        привязать было невозможно: Telethon по-прежнему «видел» себя
+        авторизованным в другом аккаунте, запрос кода/вход падали с
+        неясной ошибкой, а после перезапуска бота старая привязка
+        возвращалась сама. Теперь сессия удаляется физически."""
+        if self.client:
+            try:
+                await self.client.disconnect()
+            except Exception as e:
+                logger.warning(f"Userbot: ошибка при обрыве соединения: {e}")
+        self.client = None
+        self.is_connected = False
+        for f in (self.session_name + ".session", self.session_name):
+            try:
+                if os.path.exists(f):
+                    os.remove(f)
+                    logger.info(f"Userbot: файл сессии {f} удалён")
+            except Exception as e:
+                logger.warning(f"Userbot: не удалось удалить {f}: {e}")
+        return True
+
+    async def send_code_request(self, phone: str) -> Tuple[bool, str]:
+        """Отправляем код. ИСПРАВЛЕНО (v3):
+        - возвращает (ok, ошибка) — репетитор видит реальную причину,
+          а не просто «Ошибка отправки кода»;
+        - если привязан другой аккаунт (другой номер) — автоматически
+          сбрасывает старую сессию, иначе Telegram не даст код на
+          новый номер (API думает, что вы уже в другом аккаунте)."""
+        phone = normalize_phone(phone)
+        if not phone:
+            return False, "Не распознан номер. Формат: +79991234567 или +15551234567"
+        try:
+            old_phone = await self.current_account_phone()
+            if old_phone and old_phone != phone:
+                logger.info(
+                    f"Userbot: смена аккаунта {old_phone} → {phone}, "
+                    "сбрасываю старую сессию"
+                )
+                await self.reset_session()
+        except Exception as e:
+            logger.warning(f"Userbot: не удалось проверить старый аккаунт: {e}")
         if not self.client:
             try:
-                self.client = TelegramClient(
-                    self.session_name,
-                    self.api_id,
-                    self.api_hash,
-                    system_version="4.16.30-vxCUSTOM"
-                )
+                self.client = self._fresh_client()
                 await self.client.connect()
             except Exception as e:
-                logger.error(f"Userbot: не удалось создать клиент: {e}")
-                return False
+                return False, f"Не удалось создать клиент: {e}"
         try:
             await self.client.send_code_request(phone)
             logger.info(f"Userbot: код отправлен на {phone}")
-            return True
+            return True, ""
+        except FloodWaitError as e:
+            return False, f"Слишком много попыток — Telegram просит подождать {e.seconds} с."
+        except PhoneBannedError:
+            return False, "Этот номер забанен в Telegram."
         except Exception as e:
-            logger.error(f"Userbot: ошибка отправки кода на {phone}: {e}")
-            return False
-    async def sign_in(self, phone: str, code: str) -> bool:
-        """Входим по коду подтверждения."""
+            err = f"{type(e).__name__}: {e}"
+            logger.error(f"Userbot: ошибка отправки кода на {phone}: {err}")
+            return False, err
+    async def sign_in(self, phone: str, code: str) -> Tuple[bool, str]:
+        """Входим по коду. ИСПРАВЛЕНО (v3): возвращает (ok, ошибка).
+        Особая ошибка 'PASSWORD' — у аккаунта двухступенчатый пароль,
+        он запрашивается отдельно (finish_2fa)."""
         if not self.client:
-            logger.error("Userbot: клиент не инициализирован")
-            return False
+            return False, "Клиент не инициализирован"
         try:
             await self.client.sign_in(phone, code)
             self.is_connected = True
             me = await self.client.get_me()
             logger.info(f"✅ Userbot авторизован: {me.first_name} ({me.phone})")
-            return True
+            return True, ""
+        except SessionPasswordNeededError:
+            logger.info("Userbot: у аккаунта включён двухступенчатый пароль")
+            return False, "PASSWORD"
+        except PhoneCodeInvalidError:
+            return False, "Код неверен или истёк (живёт ~5 минут). Введите код из Telegram ещё раз:"
+        except FloodWaitError as e:
+            return False, f"Слишком много попыток — подождите {e.seconds} с."
         except Exception as e:
-            logger.error(f"Userbot: ошибка входа: {e}")
-            return False
+            err = f"{type(e).__name__}: {e}"
+            logger.error(f"Userbot: ошибка входа: {err}")
+            return False, err
+    async def finish_2fa(self, password: str) -> Tuple[bool, str]:
+        """В3: завершение входа двухступенчатым паролем Telegram."""
+        if not self.client:
+            return False, "Клиент не инициализирован"
+        try:
+            await self.client.sign_in(password=password)
+            self.is_connected = True
+            me = await self.client.get_me()
+            logger.info(f"✅ Userbot авторизован (2FA): {me.first_name} ({me.phone})")
+            return True, ""
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            logger.error(f"Userbot: ошибка 2FA: {err}")
+            return False, err
     async def get_chats(self, limit: int = 50) -> list:
         """Получаем список групп и каналов для рассылки."""
         if not self.is_connected or not self.client:

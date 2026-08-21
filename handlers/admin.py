@@ -82,6 +82,7 @@ class ABTestSetup(StatesGroup):
 class UserbotLogin(StatesGroup):
     phone = State()
     code = State()
+    password = State()  # v3: двухступенчатый пароль (2FA)
 class UserbotAddChat(StatesGroup):
     username = State()
 class UserbotMailing(StatesGroup):
@@ -359,6 +360,9 @@ async def admin_userbot_menu(callback: CallbackQuery, state: FSMContext):
         builder.button(text="💬 Список чатов", callback_data="ub:chats")
         builder.button(text="➕ Добавить по @username", callback_data="ub:add_chat:start")
         builder.button(text="📢 Рассылка от моего имени", callback_data="ub:mail:start")
+        # v3: раньше сменить номер было невозможно — старая сессия
+        # «закрывала» вход для любого другого аккаунта
+        builder.button(text="🔄 Сменить аккаунт", callback_data="ub:switch")
         builder.button(text="🔌 Отключить", callback_data="ub:disconnect")
         builder.button(text="◀️ Назад", callback_data="admin:mailings")
         builder.adjust(1)
@@ -411,15 +415,16 @@ async def userbot_login_env_phone(callback: CallbackQuery, state: FSMContext):
     if not await check_admin(callback):
         return
     phone = userbot.phone
-    success = await userbot.send_code_request(phone)
-    if success:
+    ok, err = await userbot.send_code_request(phone)
+    if ok:
         await state.update_data(phone=phone)
         await state.set_state(UserbotLogin.code)
         await callback.message.edit_text(
             f"📩 Код отправлен на <code>{phone}</code>\n\nВведите код подтверждения:"
         )
     else:
-        await callback.message.edit_text("❌ Ошибка отправки кода. Проверьте телефон в .env.")
+        # v3: показываем реальную причину, а не «Ошибка отправки кода»
+        await callback.message.edit_text(f"❌ Не удалось отправить код:\n{escape_html(err)}")
 @router.callback_query(F.data == "ub:login:other_phone")
 async def userbot_login_other_phone(callback: CallbackQuery, state: FSMContext):
     if not await check_admin(callback):
@@ -430,23 +435,59 @@ async def userbot_login_other_phone(callback: CallbackQuery, state: FSMContext):
 async def userbot_login_phone(message: Message, state: FSMContext):
     phone = message.text.strip()
     if not phone.startswith("+"):
-        await message.answer("❌ Номер с + (например +79991234567):")
-        return
-    success = await userbot.send_code_request(phone)
-    if success:
+        # v3: подставляем + автоматически, если ученик-админ ввёл без него
+        # (например 15551234567 для американского номера)
+        digits = "".join(ch for ch in phone if ch.isdigit())
+        if len(digits) < 5:
+            await message.answer("❌ Номер с + (например +79991234567):")
+            return
+        phone = "+" + digits
+    ok, err = await userbot.send_code_request(phone)
+    if ok:
         await state.update_data(phone=phone)
         await state.set_state(UserbotLogin.code)
         await message.answer(f"📩 Код отправлен на {phone}\n\nВведите код:")
     else:
-        await state.clear()
-        await message.answer("❌ Ошибка отправки кода. Проверьте номер.")
+        # v3: реальная причина ошибки + можно попробовать снова
+        await message.answer(f"❌ {escape_html(err)}\n\nВведите номер ещё раз:")
 @router.message(UserbotLogin.code)
 async def userbot_login_code(message: Message, state: FSMContext):
     data = await state.get_data()
     phone = data.get("phone", "")
     code = message.text.strip()
-    success = await userbot.sign_in(phone, code)
-    if success:
+    ok, err = await userbot.sign_in(phone, code)
+    if ok:
+        await state.clear()
+        me = None
+        try:
+            me = await userbot.client.get_me()
+        except Exception:
+            pass
+        name = escape_html(me.first_name) if me else "—"
+        await message.answer(
+            f"✅ Userbot авторизован: {name}\n\n"
+            f"Теперь можно делать рассылку от вашего имени.\n\n"
+            f"⚠️ Помните о риске бана!"
+        )
+        await db.log_action(message.from_user.id, "userbot_authorized")
+    elif err == "PASSWORD":
+        # v3: аккаунт с двухступенчатым паролем (у нового/US-аккаунта
+        # он включён по умолчанию в некоторых настройках)
+        await state.update_data(phone=phone)
+        await state.set_state(UserbotLogin.password)
+        await message.answer(
+            "🔐 У этого аккаунта включён двухступенчатый пароль.\n\n"
+            "Введите пароль Telegram (не код, а тот, что задаётся в "
+            "Настройки → Конфиденциальность → Дополнительный пароль):"
+        )
+    else:
+        # v3: настоящая причина, а не «Неверный код»
+        await message.answer(f"❌ {escape_html(err)}\n\nВведите код ещё раз:")
+@router.message(UserbotLogin.password)
+async def userbot_login_password(message: Message, state: FSMContext):
+    # v3: завершение входа для аккаунтов с 2FA
+    ok, err = await userbot.finish_2fa(message.text.strip())
+    if ok:
         await state.clear()
         me = None
         try:
@@ -461,13 +502,54 @@ async def userbot_login_code(message: Message, state: FSMContext):
         )
         await db.log_action(message.from_user.id, "userbot_authorized")
     else:
-        await message.answer("❌ Неверный код. Попробуйте ещё раз:")
+        await message.answer(f"❌ {escape_html(err)}\n\nВведите пароль ещё раз:")
+# ===== v3: СМЕНА АККАУНТА USERBOT =====
+@router.callback_query(F.data == "ub:switch")
+async def userbot_switch_ask(callback: CallbackQuery, state: FSMContext):
+    # v3: прежде это было невозможно — сессия старым аккаунтом
+    # блокировала привязку любого другого номера (US и др.)
+    if not await check_admin(callback):
+        return
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, отвязать и сменить", callback_data="ub:switch:yes")
+    builder.button(text="◀️ Отмена", callback_data="admin:mail:userbot")
+    builder.adjust(1)
+    await state.clear()
+    await callback.message.edit_text(
+        "🔄 <b>Смена аккаунта userbot</b>\n\n"
+        "Текущая привязка будет удалена (файл сессии тоже), "
+        "после этого можно ввести любой другой номер — в том числе "
+        "американский +1... и т.д.\n\nПродолжить?",
+        reply_markup=builder.as_markup(),
+    )
+@router.callback_query(F.data == "ub:switch:yes")
+async def userbot_switch_do(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback):
+        return
+    await userbot.reset_session()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📱 Ввести новый номер", callback_data="ub:login:other_phone")
+    if userbot.phone:
+        builder.button(
+            text=f"📱 Отправить код на {userbot.phone}",
+            callback_data="ub:login:env_phone",
+        )
+    builder.button(text="◀️ Назад", callback_data="admin:mail:userbot")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        "🧹 Старый аккаунт отвязан.\n\nТеперь введите номер нового аккаунта:",
+        reply_markup=builder.as_markup(),
+    )
 @router.callback_query(F.data == "ub:disconnect")
 async def userbot_disconnect(callback: CallbackQuery):
     if not await check_admin(callback):
         return
-    await userbot.disconnect()
-    await callback.message.edit_text("🔌 Userbot отключен.")
+    # v3: «Отключить» теперь удаляет и файл сессии — иначе при следующем
+    # запуске бота старый аккаунт подключался обратно сам
+    await userbot.reset_session()
+    await callback.message.edit_text(
+        "🔌 Userbot отключен, старая сессия удалена."
+    )
     await db.log_action(callback.from_user.id, "userbot_disconnected")
 # =================== USERBOT: СПИСОК ЧАТОВ ===================
 @router.callback_query(F.data == "ub:chats")
