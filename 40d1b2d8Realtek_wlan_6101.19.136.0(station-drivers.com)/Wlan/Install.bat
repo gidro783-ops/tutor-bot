@@ -1,0 +1,1 @@
+C:\windows\system32\pnputil.exe -i -a *.inf /subdirs

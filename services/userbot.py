@@ -25,6 +25,10 @@ class UserbotService:
         self.session_name = "data/tutor_userbot_session"
         self.client: Optional[TelegramClient] = None
         self.is_connected = False
+        # v3.2: хэш кода, который Telethon понадобится при sign_in.
+        # Без передачи этого хэша Telegraph часто возвращает PhoneCodeExpiredError
+        # даже для свежего кода (особенно на +1-номерах).
+        self.phone_code_hash: Optional[str] = None
     async def connect(self):
         """Подключение userbot. Если есть сохранённая сессия — подключается автоматически."""
         if not self.api_id or not self.api_hash:
@@ -126,8 +130,15 @@ class UserbotService:
             except Exception as e:
                 return False, f"Не удалось создать клиент: {e}"
         try:
-            await self.client.send_code_request(phone)
-            logger.info(f"Userbot: код отправлен на {phone}")
+            # v3.2: ОБЯЗАТЕЛЬНО сохраняем phone_code_hash для входа.
+            # Объект SentCode содержит его; без него sign_in во многих случаях
+            # возвращает PhoneCodeExpiredError даже для только что присланного кода.
+            sent = await self.client.send_code_request(phone)
+            self.phone_code_hash = getattr(sent, "phone_code_hash", None)
+            logger.info(
+                f"Userbot: код отправлен на {phone} "
+                f"(phone_code_hash={'есть' if self.phone_code_hash else 'НЕТ'})"
+            )
             return True, ""
         except FloodWaitError as e:
             return False, f"Слишком много попыток — Telegram просит подождать {e.seconds} с."
@@ -146,12 +157,18 @@ class UserbotService:
             return False, err
     async def sign_in(self, phone: str, code: str) -> Tuple[bool, str]:
         """Входим по коду. ИСПРАВЛЕНО (v3): возвращает (ok, ошибка).
-        Особая ошибка 'PASSWORD' — у аккаунта двухступенчатый пароль,
-        он запрашивается отдельно (finish_2fa)."""
+        v3.2: используем phone_code_hash из send_code_request — иначе
+        Telegram чаще всего отвечает PhoneCodeExpiredError даже на
+        корректный свежий код."""
         if not self.client:
             return False, "Клиент не инициализирован"
         try:
-            await self.client.sign_in(phone, code)
+            if self.phone_code_hash:
+                await self.client.sign_in(
+                    phone, code, phone_code_hash=self.phone_code_hash
+                )
+            else:
+                await self.client.sign_in(phone, code)
             self.is_connected = True
             me = await self.client.get_me()
             logger.info(f"✅ Userbot авторизован: {me.first_name} ({me.phone})")
