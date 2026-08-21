@@ -800,20 +800,30 @@ async def admin_dnd(callback: CallbackQuery):
     )
 @router.callback_query(F.data == "admin:dnd:enable")
 async def admin_dnd_enable(callback: CallbackQuery):
+    # ИСПРАВЛЕНО: убрана сломанная конструкция из двух строк, из-за которой
+    # кнопка «Включить DND» работала некорректно
     if not await check_admin(callback):
         return
     await db.set_dnd(True)
-    from keyboards.common_kb import back_button
-    await callback.message.edit_text("✅ DND включён.", reply_markup=admin_dnd_menu()),
-    reply_markup=back_button("admin:back")
+    start = await db.get_setting("dnd_start", config.DND_START)
+    end = await db.get_setting("dnd_end", config.DND_END)
+    await callback.message.edit_text(
+        f"✅ <b>DND включён.</b>\n\n"
+        f"⏰ Окно: {start} — {end} ({config.TIMEZONE})\n"
+        f"В это время бот не отвечает ученикам "
+        f"и присылает автоответ.",
+        reply_markup=admin_dnd_menu(),
+    )
 @router.callback_query(F.data == "admin:dnd:disable")
 async def admin_dnd_disable(callback: CallbackQuery):
+    # ИСПРАВЛЕНО: аналогично кнопке включения
     if not await check_admin(callback):
         return
     await db.set_dnd(False)
-    from keyboards.common_kb import back_button
-    await callback.message.edit_text("🔔 DND выключен.", reply_markup=admin_dnd_menu()),
-    reply_markup=back_button("admin:back")
+    await callback.message.edit_text(
+        "🔔 <b>DND выключен.</b>\n\nБот снова отвечает ученикам.",
+        reply_markup=admin_dnd_menu(),
+    )
 # =================== ОПЛАТЫ ===================
 @router.callback_query(F.data == "admin:payments")
 async def admin_payments(callback: CallbackQuery):

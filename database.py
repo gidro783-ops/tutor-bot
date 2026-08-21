@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, date, timedelta
 from typing import Optional
 import os
+from config import config
 logger = logging.getLogger(__name__)
 class Database:
     def __init__(self):
@@ -50,6 +51,7 @@ class Database:
                 "subject_id": "INTEGER", "confirmed_at": "TEXT", "cancelled_at": "TEXT",
                 "cancel_reason": "TEXT", "reminder_sent": "INTEGER DEFAULT 0",
                 "notes": "TEXT DEFAULT ''",
+                "reminders_sent": "TEXT DEFAULT '[]'",
             },
             "homework": {
                 "subject_id": "INTEGER", "file_ids": "TEXT DEFAULT '[]'",
@@ -263,14 +265,19 @@ class Database:
                 details TEXT DEFAULT '{}',
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
-            CREATE TABLE IF NOT EXISTS dnd_schedule (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                day_of_week INTEGER,
-                start_time TEXT NOT NULL,
-                end_time TEXT NOT NULL,
-                auto_reply_text TEXT DEFAULT
-                    'Сейчас идёт занятие. Я отвечу вам позже!'
-            );
+             CREATE TABLE IF NOT EXISTS dnd_schedule (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 day_of_week INTEGER,
+                 start_time TEXT NOT NULL,
+                 end_time TEXT NOT NULL,
+                 auto_reply_text TEXT DEFAULT
+                     'Сейчас идёт занятие. Я отвечу вам позже!'
+             );
+             -- ИСПРАВЛЕНИЕ: защита от двойного бронирования одного слота
+             -- (только активные записи; отменённые слоты освобождаются)
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_slot_active
+                 ON bookings(slot_id)
+                 WHERE status IN ('pending', 'confirmed');
         """)
         await self.db.commit()
     # =================== СТУДЕНТЫ ===================
@@ -583,7 +590,9 @@ class Database:
             return []
     async def get_today_bookings(self) -> list:
         try:
-            today = date.today().isoformat()
+            # ИСПРАВЛЕНО: учитываем таймзону из .env
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo(config.TIMEZONE)).date().isoformat()
             cursor = await self.db.execute(
                 """SELECT b.*, ts.date, ts.start_time, ts.end_time,
                           s.name as subject_name,
@@ -592,7 +601,8 @@ class Database:
                    LEFT JOIN time_slots ts ON b.slot_id = ts.id
                    LEFT JOIN subjects s ON b.subject_id = s.id
                    LEFT JOIN students st ON b.student_id = st.user_id
-                   WHERE ts.date = ? AND b.status = 'confirmed'
+                   WHERE ts.date = ?
+                   AND b.status IN ('pending', 'confirmed')
                    ORDER BY ts.start_time""",
                 (today,)
             )
@@ -603,13 +613,28 @@ class Database:
             return []
     async def get_upcoming_bookings(self,
                                     minutes_ahead: int = 60) -> list:
+        """Занятия в окне [now, now + minutes_ahead] для напоминаний.
+
+        ИСПРАВЛЕНО (напоминания не приходили):
+        1. Теперь время берётся в таймзоне из .env (TIMEZONE), а не
+           серверное (на хостинге — UTC, из-за чего окно сдвигалось на часы).
+        2. Учитываются записи со статусом 'pending' и 'confirmed'.
+           Новые записи создаются как 'pending', и если репетитор их не
+           подтверждает — напоминания по старому коду не шли никогда.
+        3. Отслеживаются уже отправленные напоминания по минутам
+           (колонка reminders_sent, JSON-список), поэтому каждый пункт
+           REMINDER_BEFORE_MINUTES (60 и 15) отправляется ровно один раз.
+        """
         try:
-            now = datetime.now()
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo(config.TIMEZONE))
             today = now.date().isoformat()
             current_time = now.strftime("%H:%M")
-            ahead_time = (
-                now + timedelta(minutes=minutes_ahead)
-            ).strftime("%H:%M")
+            ahead_dt = now + timedelta(minutes=minutes_ahead)
+            # Если окно пересекает полночь — напоминаний на него нет
+            if ahead_dt.date() != now.date():
+                return []
+            ahead_time = ahead_dt.strftime("%H:%M")
             cursor = await self.db.execute(
                 """SELECT b.*, ts.date, ts.start_time, ts.end_time,
                           s.name as subject_name,
@@ -621,20 +646,48 @@ class Database:
                    LEFT JOIN students st ON b.student_id = st.user_id
                    WHERE ts.date = ?
                    AND ts.start_time BETWEEN ? AND ?
-                   AND b.status = 'confirmed'
-                   AND b.reminder_sent = 0""",
+                   AND b.status IN ('pending', 'confirmed')""",
                 (today, current_time, ahead_time)
             )
             rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+            result = []
+            for r in rows:
+                d = dict(r)
+                try:
+                    sent = json.loads(d.get("reminders_sent") or "[]")
+                except (ValueError, TypeError):
+                    # Старые данные: считаем флаг reminder_sent за отправку 60-мин
+                    sent = [minutes_ahead] if d.get("reminder_sent") else []
+                if minutes_ahead in sent:
+                    continue
+                result.append(d)
+            return result
         except Exception as e:
             logger.error(f"[get_upcoming_bookings] Failed: {e}")
             return []
-    async def mark_reminder_sent(self, booking_id: int):
+    async def mark_reminder_sent(self, booking_id: int, minutes: int = 60):
+        """ИСПРАВЛЕНО: запоминает, какие напоминания (60/15 мин) уже
+        отправлены по конкретной записи, чтобы каждое отправлялось один раз,
+        а не блокировало остальные одним общим флагом."""
         try:
-            await self.db.execute(
-                "UPDATE bookings SET reminder_sent = 1 WHERE id = ?",
+            cursor = await self.db.execute(
+                "SELECT reminders_sent, reminder_sent FROM bookings WHERE id = ?",
                 (booking_id,)
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return
+            try:
+                sent = json.loads(row[0] or "[]")
+            except (ValueError, TypeError):
+                sent = []
+            if minutes not in sent:
+                sent.append(minutes)
+            await self.db.execute(
+                """UPDATE bookings
+                   SET reminders_sent = ?, reminder_sent = 1
+                   WHERE id = ?""",
+                (json.dumps(sent), booking_id)
             )
             await self.db.commit()
         except Exception as e:
@@ -820,16 +873,55 @@ class Database:
             logger.error(f"[get_pending_payments] Failed: {e}")
             return []
     async def get_payment_by_id(self, pay_id: int) -> Optional[dict]:
-        """НОВЫЙ МЕТОД: получить платёж по ID."""
+        """Платёж по ID (с данными ученика — для уведомлений репетитора)."""
         try:
             cursor = await self.db.execute(
-                "SELECT * FROM payments WHERE id = ?", (pay_id,)
+                """SELECT p.*, st.full_name, st.username
+                   FROM payments p
+                   LEFT JOIN students st ON p.student_id = st.user_id
+                   WHERE p.id = ?""",
+                (pay_id,)
             )
             row = await cursor.fetchone()
             return dict(row) if row else None
         except Exception as e:
             logger.error(f"[get_payment_by_id] Failed: {e}")
             return None
+    async def report_payment_paid(self, payment_id: int) -> bool:
+        """ИСПРАВЛЕНИЕ: ученик нажал «Я оплатил» — переводим счёт в
+        статус 'reported' (ожидает подтверждения репетитором).
+        Без этого счёт оставался 'pending' вечно и бот каждый день
+        повторно присылал ученику напоминание об оплате."""
+        try:
+            cursor = await self.db.execute(
+                """UPDATE payments SET status = 'reported'
+                   WHERE id = ? AND status = 'pending'""",
+                (payment_id,)
+            )
+            await self.db.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"[report_payment_paid] Failed: {e}")
+            return False
+    async def get_reported_payments(self, student_id: int = None) -> list:
+        """Счета, которые ученик пометил оплаченными, но репетитор ещё
+        не подтвердил поступление."""
+        try:
+            query = """SELECT p.*, st.full_name, st.username
+                       FROM payments p
+                       LEFT JOIN students st ON p.student_id = st.user_id
+                       WHERE p.status = 'reported'"""
+            params = []
+            if student_id:
+                query += " AND p.student_id = ?"
+                params.append(student_id)
+            query += " ORDER BY p.created_at DESC"
+            cursor = await self.db.execute(query, params)
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"[get_reported_payments] Failed: {e}")
+            return []
     async def get_all_payments(self) -> list:
         """НОВЫЙ МЕТОД: все оплаченные платежи."""
         try:
@@ -1221,7 +1313,11 @@ class Database:
                 "dnd_auto_reply",
                 "Сейчас идёт занятие. Я отвечу вам позже!"
             )
-            now = datetime.now()
+            # ИСПРАВЛЕНО: время берём в таймзоне из .env, а не серверное.
+            # На хостинге (UTC) окно DND 09:00–21:00 МСК сдвигалось на 3 часа
+            # и выглядело так, будто DND «не работает».
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo(config.TIMEZONE))
             current_minutes = now.hour * 60 + now.minute
             sh, sm = map(int, start.split(":"))
             eh, em = map(int, end.split(":"))

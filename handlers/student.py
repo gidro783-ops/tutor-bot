@@ -92,9 +92,11 @@ async def book_lesson(message: Message, state: FSMContext):
 
 @router.message(F.text == "📋 Мои занятия")
 async def my_lessons(message: Message):
-    bookings = await db.get_student_bookings(
-        message.from_user.id, status="confirmed"
-    )
+    # ИСПРАВЛЕНО: раньше показывались только 'confirmed', а новые записи
+    # создаются со статусом 'pending' — из-за этого меню было пустым.
+    from utils.helpers import visible_bookings
+    all_bookings = await db.get_student_bookings(message.from_user.id)
+    bookings = visible_bookings(all_bookings)
     if not bookings:
         await message.answer(
             "📭 У вас пока нет записей.\n\n"
@@ -103,7 +105,8 @@ async def my_lessons(message: Message):
         return
     from keyboards.student_kb import my_bookings_keyboard
     await message.answer(
-        "📋 <b>Ваши занятия:</b>",
+        "📋 <b>Ваши занятия:</b>\n\n"
+        "⏳ — ожидает подтверждения, ✅ — подтверждено",
         reply_markup=my_bookings_keyboard(bookings),
     )
 

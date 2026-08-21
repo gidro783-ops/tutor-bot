@@ -25,11 +25,14 @@ async def send_booking_reminders(bot: Bot):
                     f"⏰ Напоминание!\n\n"
                     f"Через {minutes} минут у вас занятие:\n"
                     f"📚 {escape_html(booking.get('subject_name', '—'))}\n"
+                    f"📅 {booking.get('date', '')}\n"
                     f"🕐 {booking.get('start_time', '')[:5]}\n\n"
                     f"Ждём вас!"
                 )
                 await bot.send_message(booking["student_user_id"], text)
-                await db.mark_reminder_sent(booking["id"])
+                # ИСПРАВЛЕНО: помечаем конкретное напоминание (60/15 мин),
+                # чтобы не блокировать остальные
+                await db.mark_reminder_sent(booking["id"], minutes)
                 # Также уведомляем репетитора
                 for admin_id in config.ADMIN_IDS:
                     try:

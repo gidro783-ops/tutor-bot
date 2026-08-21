@@ -175,15 +175,22 @@ async def adm_hw_pending(cb: CallbackQuery):
 async def adm_pay_pending(cb: CallbackQuery):
     if not await _adm(cb): return
     ps = await db.get_pending_payments()
-    if not ps:
+    # ИСПРАВЛЕНИЕ: сюда попадают и счета, которые ученик уже пометил
+    # («Я оплатил») — репетитору остаётся только подтвердить поступление
+    rs = await db.get_reported_payments()
+    if not ps and not rs:
         await cb.message.edit_text("✅ Нет счетов, ожидающих оплаты.", reply_markup=back_button("admin:payments"))
         return
     b = InlineKeyboardBuilder()
-    txt = f"⏳ <b>Ожидают оплаты:</b> ({len(ps)})\n\n"
+    txt = f"⏳ <b>Ожидают оплаты:</b> ({len(ps) + len(rs)})\n\n"
     for p in ps[:15]:
         nm = escape_html(p.get("full_name") or p.get("username") or str(p["student_id"]))
         txt += f"💳 #{p['id']} {nm} — {p['amount']}₽\n"
         b.button(text=f"✅ Оплачен #{p['id']}", callback_data=f"admin:pay:mark:{p['id']}")
+    for p in rs[:15]:
+        nm = escape_html(p.get("full_name") or p.get("username") or str(p["student_id"]))
+        txt += f"🔔 #{p['id']} {nm} — {p['amount']}₽ (ученик оплатил)\n"
+        b.button(text=f"✅ Подтвердить #{p['id']}", callback_data=f"admin:pay:mark:{p['id']}")
     b.button(text="◀️ Назад", callback_data="admin:payments")
     b.adjust(1)
     await cb.message.edit_text(txt, reply_markup=b.as_markup())
@@ -358,7 +365,11 @@ async def my_booking(cb: CallbackQuery):
 
 @router.callback_query(F.data == "mybookings:list")
 async def my_bookings_list(cb: CallbackQuery):
-    bs = await db.get_student_bookings(cb.from_user.id, status="confirmed")
+    # ИСПРАВЛЕНО: показываем все активные записи (pending + confirmed),
+    # а не только 'confirmed'
+    from utils.helpers import visible_bookings
+    all_bookings = await db.get_student_bookings(cb.from_user.id)
+    bs = visible_bookings(all_bookings)
     if not bs:
         await cb.message.edit_text("📭 У вас пока нет записей.")
         return
@@ -372,12 +383,36 @@ async def pay_paid(cb: CallbackQuery):
     if not p or p["student_id"] != cb.from_user.id:
         await cb.answer("Не найдено", show_alert=True)
         return
+    if p.get("status") != "pending":
+        await cb.answer("Этот счёт уже оплачен или отмечен как оплаченный", show_alert=True)
+        return
+    # ИСПРАВЛЕНИЕ: фиксируем статус 'reported'. Без этого счёт оставался
+    # 'pending' навсегда и бот каждый день снова слал ученику
+    # «напоминание об оплате», а в статистике платежи не закрывались.
+    await db.report_payment_paid(pid)
+    nm = escape_html(p.get("full_name") or p.get("username") or str(cb.from_user.id))
+    # Подтверждение репетитору с полным описанием
     for aid in config.ADMIN_IDS:
         try:
-            await cb.bot.send_message(aid, f"💳 Ученик сообщает об оплате счёта #{pid} на {p['amount']}₽. Проверьте: /admin → Оплаты.")
+            await cb.bot.send_message(
+                aid,
+                f"💳 <b>Ученик сообщил об оплате!</b>\n\n"
+                f"👤 {nm}\n"
+                f"💰 Сумма: {p['amount']}₽\n"
+                f"📋 {escape_html(p.get('description') or '—')}\n"
+                f"🆔 Счёт #{pid}\n\n"
+                f"Проверьте поступление и подтвердите: "
+                f"/admin → Оплаты → «⏳ Ожидают оплаты»"
+            )
         except Exception as e:
-            logger.warning(f"[pay_paid] {e}")
-    await cb.answer("✅ Репетитор уведомлён!", show_alert=True)
+            logger.warning(f"[pay_paid] notify admin {aid}: {e}")
+    await cb.answer("✅ Подтверждение отправлено репетитору!", show_alert=True)
+    # Ученику — понятный статус
+    await cb.message.edit_text(
+        f"⏳ <b>Оплата счёта #{pid} сообщена.</b>\n\n"
+        f"Репетитор получил уведомление и проверит поступление. "
+        f"Как только подтвердит оплату — счёт будет закрыт 🎉"
+    )
 
 # ===== ЕДИНЫЙ FSM-ВВОД =====
 @router.message(Step.flow)

@@ -2,6 +2,44 @@ import hashlib
 import secrets
 import re
 from datetime import datetime, date
+# ============ СПИСОК ЗАПИСЕЙ УЧЕНИКА ============
+def visible_bookings(all_bookings: list) -> list:
+    """ИСПРАВЛЕНИЕ: записи, которые ученик видит в «Мои занятия».
+
+    Раньше показывались только 'confirmed', но новые записи создаются
+    со статусом 'pending', поэтому у ученика «Мои занятия» был пустым,
+    хотя в админ-панели всё видно. Теперь:
+    - скрыты только отменённые (cancelled);
+    - сначала предстоящие (pending/confirmed, дата >= сегодня) по времени;
+    - потом прошедшие/завершённые в обратном порядке.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from config import config
+    try:
+        today = datetime.now(ZoneInfo(config.TIMEZONE)).date().isoformat()
+    except Exception:
+        today = date.today().isoformat()
+
+    def sort_key(b):
+        return (b.get("date") or "", b.get("start_time") or "")
+
+    active = [b for b in all_bookings if b.get("status") != "cancelled"]
+    upcoming = sorted(
+        (
+            b for b in active
+            if b.get("status") in ("pending", "confirmed")
+            and (b.get("date") or "") >= today
+        ),
+        key=sort_key,
+    )
+    upcoming_ids = {b["id"] for b in upcoming}
+    past = sorted(
+        (b for b in active if b["id"] not in upcoming_ids),
+        key=sort_key,
+        reverse=True,
+    )
+    return upcoming + past
 # ============ ЭКРАНИРОВАНИЕ (исправляет Markdown + user input) ============
 def escape_html(text: str) -> str:
     """Экранирование HTML-спецсимволов для parse_mode='HTML'."""

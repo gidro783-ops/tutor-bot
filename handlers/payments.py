@@ -17,17 +17,28 @@ class CreatePaymentAdmin(StatesGroup):
 @router.message(F.text == "💳 Оплата")
 async def my_payments_menu(message: Message):
     payments = await db.get_pending_payments(message.from_user.id)
-    if not payments:
+    # ИСПРАВЛЕНИЕ: показываем и счета со статусом 'reported'
+    # («Я оплатил» нажат, ждём подтверждения репетитора)
+    reported = await db.get_reported_payments(message.from_user.id)
+    if not payments and not reported:
         await message.answer("✅ Нет неоплаченных счетов!")
         return
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     builder = InlineKeyboardBuilder()
-    text = "💳 <b>Неоплаченные счета:</b>\n\n"
+    text = "💳 <b>Ваши счета:</b>\n\n"
     for p in payments:
         text += f"• #{p['id']} {p['amount']}₽ — {escape_html(p.get('description', ''))}\n"
         builder.button(text=f"✅ Я оплатил #{p['id']}", callback_data=f"payment:paid:{p['id']}")
-    builder.adjust(1)
-    await message.answer(text, reply_markup=builder.as_markup())
+    for p in reported:
+        text += (
+            f"• ⏳ #{p['id']} {p['amount']}₽ — оплата сообщена, "
+            f"ждём подтверждения от репетитора\n"
+        )
+    if builder.buttons:
+        builder.adjust(1)
+        await message.answer(text, reply_markup=builder.as_markup())
+    else:
+        await message.answer(text)
 @router.callback_query(F.data.startswith("payment:view:"))
 async def view_payment(callback: CallbackQuery):
     pay_id = int(callback.data.split(":")[-1])
@@ -110,19 +121,30 @@ async def admin_pay_description(message: Message, state: FSMContext):
 # =================== АДМИН: отметить оплаченным ===================
 @router.callback_query(F.data.startswith("admin:pay:mark:"))
 async def admin_mark_paid(callback: CallbackQuery):
+    # ИСПРАВЛЕНИЕ: теперь доступна только админу (раньше её мог нажать
+    # любой ученик и пометить чужой счёт оплаченным)
+    from handlers.admin import check_admin
+    if not await check_admin(callback):
+        return
     pay_id = int(callback.data.split(":")[-1])
+    payment = await db.get_payment_by_id(pay_id)
+    if not payment or payment.get("status") not in ("pending", "reported"):
+        await callback.answer("Счёт не найден или уже оплачен", show_alert=True)
+        return
     try:
-        cursor = await db.db.execute(
-            """UPDATE payments 
-               SET status = 'paid', paid_at = datetime('now')
-               WHERE id = ? AND status = 'pending'""",
-            (pay_id,)
-        )
-        await db.db.commit()
-        if cursor.rowcount == 0:
-            await callback.answer("Счёт не найден или уже оплачен", show_alert=True)
-            return
+        # ИСПРАВЛЕНИЕ: подтверждаем и 'pending', и 'reported'
+        await db.confirm_payment(pay_id, method="admin_confirmed")
         await callback.message.edit_text(f"✅ Счёт #{pay_id} отмечен как оплаченный.")
+        # Уведомляем ученика, что оплата подтверждена
+        try:
+            await callback.bot.send_message(
+                payment["student_id"],
+                f"🎉 <b>Оплата подтверждена!</b>\n\n"
+                f"Счёт #{pay_id} на {payment['amount']}₽ закрыт.\n"
+                f"Спасибо! Ждём вас на занятии 📚"
+            )
+        except Exception as e:
+            logger.warning(f"[admin_mark_paid] notify student: {e}")
     except Exception as e:
         logger.error(f"Failed to mark payment as paid: {e}")
         await callback.answer("Ошибка", show_alert=True)
