@@ -1,4 +1,4 @@
-from aiogram import Router, F
+﻿from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -118,7 +118,7 @@ async def process_password(message: Message, state: FSMContext):
             f"🔒 Слишком много попыток. Попробуйте через {remaining} мин."
         )
         return
-    if message.text == config.ADMIN_PASSWORD:
+    if config.verify_admin_password(message.text or ""):
         _failed_attempts[admin_id] = 0
         _locked_until.pop(admin_id, None)
         await db.authenticate_admin(admin_id, hours=12)

@@ -1,5 +1,34 @@
-venv/
-__pycache__/
-*.db
+# ==================== СЕКРЕТЫ ====================
 .env
+.env.*
+!.env.example
+
+# Telethon-сессии = ПОЛНЫЙ доступ к Telegram-аккаунту.
+# Утечка .session-файла страшнее утечки пароля!
+*.session
+*.session-journal
+
+# ==================== ДАННЫЕ ====================
+*.db
+*.db-wal
+*.db-shm
+data/backups/
+!data/.gitkeep
+
+# ==================== PYTHON ====================
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ==================== БЭКАПЫ / ОС ====================
 __backup_before_fix_*
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke-test:
+    name: Smoke tests (логика БД и напоминаний)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Смоук-тест подменяет внешние зависимости шимами,
+      # поэтому pip install не нужен — прогон занимает секунды.
+      - name: Run smoke test
+        run: python tests/smoke_test.py
+
+  lint:
+    name: Ruff
+    runs-on: ubuntu-latest
+    # «Мягкий» режим: отчёт есть, но сборка не падает.
+    # Добейтесь зелёного прогона — и уберите эту строку.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install ruff==0.6.9
+      - run: ruff check .

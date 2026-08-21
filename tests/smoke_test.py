@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Смоук-тест исправлений tutor-bot.
 Запуск (без aiogram, без интернет-вызовов, на отдельной тестовой БД):
@@ -6,11 +6,11 @@
 Проверяет: напоминания, «Мои занятия», двойное бронирование,
 оплату «Я оплатил», DND с таймзоной, утреннюю сводку.
 """
-import sys, os, asyncio, sqlite3, types
+import sys, os, asyncio, sqlite3, tempfile, types
 from datetime import datetime, timedelta
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TEST_DB = "/tmp/tbtest_tutor.db"
+TEST_DB = os.path.join(tempfile.gettempdir(), "tbtest_tutor.db")
 
 os.environ["ADMIN_PASSWORD"] = os.environ.get("ADMIN_PASSWORD", "testpass123")
 os.environ["ENCRYPTION_KEY"] = os.environ.get("ENCRYPTION_KEY", "ZmFrZS1rZXktZm9yLXRlc3Rpbmctb25seQ==")

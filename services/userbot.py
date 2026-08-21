@@ -1,4 +1,4 @@
-import os
+﻿import os
 import asyncio
 import logging
 import random
@@ -22,7 +22,7 @@ class UserbotService:
         self.api_id = int(os.getenv("TELEGRAM_API_ID", "0"))
         self.api_hash = os.getenv("TELEGRAM_API_HASH", "")
         self.phone = os.getenv("TELEGRAM_PHONE", "")
-        self.session_name = "data/tutor_userbot_session"
+        self.session_name = os.getenv("USERBOT_SESSION_PATH", "data/tutor_userbot_session")
         self.client: Optional[TelegramClient] = None
         self.is_connected = False
         # v3.2: хэш кода, который Telethon понадобится при sign_in.
