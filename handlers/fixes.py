@@ -168,6 +168,7 @@ async def slot_unblock(cb: CallbackQuery):
 @router.callback_query(F.data == "admin:homework")
 async def adm_hw_menu(cb: CallbackQuery, state: FSMContext):
     if not await _adm(cb): return
+    # ДЗ доступны и на Free — лимит 5 в месяц проверяется при создании
     await state.clear()
     await cb.message.edit_text("📝 <b>Домашние задания</b>", reply_markup=admin_homework_menu())
 

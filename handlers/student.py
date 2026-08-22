@@ -53,6 +53,20 @@ async def cmd_start(message: Message, state: FSMContext):
     args = message.text.split(" ", 1)
     existing_student = await db.get_student(user.id)
     is_new_student = existing_student is None
+
+    # Тариф Free: не пускаем НОВЫХ учеников сверх лимита (PRO — безлимит)
+    if is_new_student and config.ADMIN_IDS:
+        from services import subscription as sub_service
+
+        owner_id = config.ADMIN_IDS[0]
+        students_count = len(await db.get_all_students())
+        if not await sub_service.can_add_student(owner_id, students_count):
+            logger.info("Free limit reached: new student %s blocked", user.id)
+            await message.answer(
+                "😔 Извините, все места на бесплатном тарифе заняты.\n"
+                "Попросите репетитора перейти на PRO — и запись сразу откроется."
+            )
+            return
     referrer_id = None
     source = "direct"
     source_chat_id = None

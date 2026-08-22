@@ -9,7 +9,8 @@ from aiogram.types import CallbackQuery, Message
 
 from database import db
 from keyboards.admin_kb import admin_subjects_menu, back_button
-from utils.helpers import escape_html
+from keyboards.subscription_kb import cancel_flow_kb
+from utils.helpers import escape_html, is_cancel
 
 from .core import check_admin
 
@@ -54,9 +55,15 @@ async def admin_add_subject(callback: CallbackQuery, state: FSMContext):
     if not await check_admin(callback):
         return
     await state.set_state(AddSubject.name)
-    await callback.message.edit_text("📚 Название предмета:")
+    await callback.message.edit_text(
+        "📚 Название предмета:", reply_markup=cancel_flow_kb()
+    )
 @router.message(AddSubject.name)
 async def add_subject_name(message: Message, state: FSMContext):
+    if is_cancel(message.text):
+        await state.clear()
+        await message.answer("❌ Добавление предмета отменено.")
+        return
     name = message.text.strip()
     if not name or len(name) > 200:
         await message.answer("❌ Название от 1 до 200 символов:")
@@ -67,6 +74,10 @@ async def add_subject_name(message: Message, state: FSMContext):
 @router.message(AddSubject.price)
 async def add_subject_price(message: Message, state: FSMContext):
     from utils.helpers import validate_amount
+    if is_cancel(message.text):
+        await state.clear()
+        await message.answer("❌ Добавление предмета отменено.")
+        return
     try:
         price = validate_amount(message.text)
     except ValueError as e:

@@ -85,6 +85,11 @@ def truncate_text(text: str, max_length: int = 100) -> str:
     if len(text) <= max_length:
         return text
     return text[:max_length - 3] + "..."
+# ============ ОТМЕНА ВВОДА ============
+CANCEL_WORDS = {"отмена", "/cancel", "cancel"}
+def is_cancel(text: str) -> bool:
+    """Пользователь хочет прервать ввод текстом («отмена», /cancel)."""
+    return (text or "").strip().lower() in CANCEL_WORDS
 # ============ DND С НАСТРАИВАЕМОЙ ТАЙМЗОНОЙ ============
 def is_dnd_active(start_time: str, end_time: str, timezone: str = "Europe/Moscow") -> bool:
     """Проверка, активно ли DND прямо сейчас в заданной таймзоне."""

@@ -1,3 +1,4 @@
+from handlers.common import router as common_router
 from handlers.admin import router as admin_router
 from handlers.fixes import router as fixes_router
 from handlers.student import router as student_router
@@ -8,7 +9,9 @@ from handlers.reviews import router as reviews_router
 from handlers.analytics import router as analytics_router
 from handlers.mailing import router as mailing_router
 from handlers.referral import router as referral_router
+from handlers.subscription import router as subscription_router
 __all__ = [
+    "common_router",
     "admin_router",
     "fixes_router",
     "student_router",
@@ -19,4 +22,5 @@ __all__ = [
     "analytics_router",
     "mailing_router",
     "referral_router",
+    "subscription_router",
 ]

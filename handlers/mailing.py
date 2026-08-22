@@ -83,7 +83,7 @@ async def mailing_delay(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "mail:confirm:yes")
 async def mailing_confirm(callback: CallbackQuery, state: FSMContext):
-    """Отправка рассылки (без дневного лимита)."""
+    """Отправка рассылки. На Free — дневной лимит сообщений."""
     data = await state.get_data()
     text = data.get("text", "")
     target = data.get("target", "all")
@@ -98,6 +98,25 @@ async def mailing_confirm(callback: CallbackQuery, state: FSMContext):
     if not students_list:
         await callback.message.edit_text("📭 Нет учеников для рассылки.")
         return
+    # Тарифный лимит Free: N сообщений в день
+    from config import config as _config
+
+    if _config.ADMIN_IDS:
+        from handlers.admin.core import upsell_kb as _upsell_kb
+        from services import subscription as sub_service
+
+        _owner = _config.ADMIN_IDS[0]
+        left = await sub_service.mailing_left_today(_owner)
+        if left is not None and len(students_list) > left:
+            await callback.message.edit_text(
+                f"🚫 <b>Лимит бесплатного тарифа</b>\n\n"
+                f"Сегодня можно отправить ещё {left} сообщений, "
+                f"а учеников — {len(students_list)}.\n\n"
+                f"PRO (990 ₽/мес) снимает лимиты. "
+                f"Или начните с 7 бесплатных дней 👇",
+                reply_markup=await _upsell_kb(),
+            )
+            return
     # Создаём запись в БД
     try:
         cursor = await db.db.execute(
@@ -122,6 +141,9 @@ async def mailing_confirm(callback: CallbackQuery, state: FSMContext):
         except Exception as e:
             logger.warning(f"Mailing failed for {student['user_id']}: {e}")
             errors += 1
+    # списываем фактически доставленные сообщения из дневной квоты
+    if _config.ADMIN_IDS and sent:
+        await sub_service.consume_mailing(_owner, sent)
     # Обновляем статус
     try:
         await db.db.execute(
@@ -138,6 +160,11 @@ async def mailing_confirm(callback: CallbackQuery, state: FSMContext):
         f"✅ Рассылка отправлена!\n\n"
         f"📤 Доставлено: {sent}\n"
         f"❌ Ошибок:' {errors}"
+        + (
+            f"\n\n🪙 Осталось на сегодня: {await sub_service.mailing_left_today(_owner)}"
+            if _config.ADMIN_IDS and sent and await sub_service.mailing_left_today(_owner) is not None
+            else ""
+        )
     )
 @router.callback_query(F.data == "mail:cancel")
 async def cancel_mailing(callback: CallbackQuery, state: FSMContext):

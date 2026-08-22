@@ -10,9 +10,14 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 
 from config import config
-from keyboards.subscription_kb import plans_kb, subscription_menu_kb
+from keyboards.subscription_kb import (
+    cancel_flow_kb,
+    plans_kb,
+    subscription_menu_kb,
+)
 from services import subscription as sub_service
 from services.subscription import PLANS, Plan, TRIAL_DAYS
+from utils.helpers import is_cancel
 
 logger = logging.getLogger(__name__)
 router = Router(name="subscription")
@@ -133,18 +138,32 @@ async def brand_start(message: Message, state: FSMContext):
         await message.answer("Брендинг доступен только на тарифе White Label.")
         return
     await state.set_state(BrandStates.name)
-    await message.answer("Введите название бренда (имя, которое увидят ученики):")
+    await message.answer(
+        "Введите название бренда (имя, которое увидят ученики):",
+        reply_markup=cancel_flow_kb(),
+    )
 
 
 @router.message(BrandStates.name)
 async def brand_name(message: Message, state: FSMContext):
+    if is_cancel(message.text):
+        await state.clear()
+        await message.answer("❌ Настройка бренда отменена.")
+        return
     await state.update_data(name=message.text.strip())
     await state.set_state(BrandStates.about)
-    await message.answer("Короткое описание (или '-' чтобы пропустить):")
+    await message.answer(
+        "Короткое описание (или '-' чтобы пропустить):",
+        reply_markup=cancel_flow_kb(),
+    )
 
 
 @router.message(BrandStates.about)
 async def brand_about(message: Message, state: FSMContext):
+    if is_cancel(message.text):
+        await state.clear()
+        await message.answer("❌ Настройка бренда отменена.")
+        return
     data = await state.get_data()
     about = None if message.text.strip() == "-" else message.text.strip()
     await sub_service.set_brand(message.from_user.id, data["name"], about)

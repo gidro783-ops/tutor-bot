@@ -18,7 +18,7 @@ from keyboards.admin_kb import (
 from services.userbot import userbot
 from utils.helpers import escape_html
 
-from .core import check_admin
+from .core import check_admin, require_feature
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -28,6 +28,7 @@ router = Router()
 async def admin_mailings(callback: CallbackQuery):
     if not await check_admin(callback):
         return
+    # Рассылки доступны и на Free (лимит сообщений проверяется при отправке)
     await callback.message.edit_text(
         "📢 <b>Рассылки</b>",
         reply_markup=admin_mailings_menu(),
@@ -90,6 +91,8 @@ async def admin_faq(callback: CallbackQuery):
 @router.callback_query(F.data == "admin:analytics")
 async def admin_analytics(callback: CallbackQuery):
     if not await check_admin(callback):
+        return
+    if not await require_feature(callback, "analytics"):
         return
     try:
         from services.analytics_service import AnalyticsService

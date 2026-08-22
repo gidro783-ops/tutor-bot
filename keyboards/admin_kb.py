@@ -21,6 +21,7 @@ def admin_main_menu() -> InlineKeyboardMarkup:
         ("🎯 Реферальная система", "admin:referrals"),
         ("🧪 A/B тесты", "admin:ab_tests"),
         ("⚙️ Настройки", "admin:settings"),
+        ("💎 Подписка", "open_plans"),
         ("🚪 Выйти", "admin:logout"),
     ]
     for text, callback in buttons:

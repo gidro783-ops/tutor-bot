@@ -8,7 +8,7 @@ from telethon.tl.types import Chat, Channel
 from telethon.errors import (
     UsernameInvalidError, UsernameNotOccupiedError,
     SessionPasswordNeededError, PhoneCodeInvalidError,
-    FloodWaitError, RPCError,
+    PhoneCodeExpiredError, FloodWaitError, RPCError,
 )
 logger = logging.getLogger(__name__)
 
@@ -139,10 +139,20 @@ class UserbotService:
                 return False, f"Не удалось создать клиент: {e}"
         try:
             # v3.2: ОБЯЗАТЕЛЬНО сохраняем phone_code_hash для входа.
-            # Объект SentCode содержит его; без него sign_in во многих случаях
-            # возвращает PhoneCodeExpiredError даже для только что присланного кода.
+            # ИСПРАВЛЕНО: Telethon (актуальные версии) возвращает из
+            # send_code_request СТРОКУ — сам хэш. Прежний код делал
+            # getattr(sent, "phone_code_hash", None) и всегда получал None,
+            # из-за чего sign_in уходил без хэша и Telegram отклонял даже
+            # верный код. Поддерживаем и старый формат (объект SentCode).
             sent = await self.client.send_code_request(phone)
-            self.phone_code_hash = getattr(sent, "phone_code_hash", None)
+            if isinstance(sent, str):
+                self.phone_code_hash = sent or None
+            else:
+                code_hash = getattr(sent, "phone_code_hash", None)
+                if not code_hash:
+                    inner = getattr(sent, "sent_code", None) or getattr(sent, "phone", None)
+                    code_hash = getattr(inner, "phone_code_hash", None)
+                self.phone_code_hash = code_hash
             logger.info(
                 f"Userbot: код отправлен на {phone} "
                 f"(phone_code_hash={'есть' if self.phone_code_hash else 'НЕТ'})"
@@ -172,6 +182,13 @@ class UserbotService:
         if not self.client:
             return False, "Клиент не инициализирован"
         code_hash = phone_code_hash or self.phone_code_hash
+        if not code_hash:
+            # Без хэша Telethon запросит НОВЫЙ код, и введённый станет
+            # недействительным — лучше явно попросить начать заново.
+            return False, (
+                "Сессия ввода кода потеряна (возможно, бот перезапускался).\n"
+                "Нажмите «🔑 Авторизоваться» ещё раз — придёт новый код."
+            )
         try:
             if code_hash:
                 await self.client.sign_in(
@@ -193,6 +210,11 @@ class UserbotService:
                 "— не истёк ли (живёт ~5 минут, затем просите новый);\n"
                 "— не осталась ли активна старая сессия (нажмите «🔌 Отключить» и начните заново).\n"
                 "Введите код ещё раз:"
+            )
+        except PhoneCodeExpiredError:
+            return False, (
+                "⌛ Код истёк (живёт ~5 минут).\n"
+                "Нажмите «🔑 Авторизоваться» ещё раз — придёт новый код."
             )
         except FloodWaitError as e:
             return False, f"Слишком много попыток — подождите {e.seconds} с."

@@ -59,6 +59,12 @@ class Config:
 
     DATABASE_PATH: str = os.getenv("DATABASE_PATH", "data/tutor_bot.db")
 
+    # Токен платёжного провайдера для оплаты подписки PRO (990 ₽/мес).
+    # Получается у @BotFather: /mybots → Payments → подключить провайдера
+    # (ЮKassa / Сбер / TELEGRAM —Stars и т.п.) и скопировать токен.
+    # Пусто — оплата по кнопке недоступна (бот сообщит, что не настроено).
+    PAYMENT_PROVIDER_TOKEN: str = os.getenv("PAYMENT_PROVIDER_TOKEN", "")
+
     # === БЕЗОПАСНОСТЬ: ключ шифрования ОБЯЗАТЕЛЬНО задавать в .env ===
     # Генерация: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     _raw_key = os.getenv("ENCRYPTION_KEY", "")

@@ -17,6 +17,50 @@ from utils.texts import Texts
 logger = logging.getLogger(__name__)
 router = Router()
 
+
+def owner_id() -> int | None:
+    """ID владельца бота (первый из ADMIN_IDS) — ему принадлежит подписка."""
+    return config.ADMIN_IDS[0] if config.ADMIN_IDS else None
+
+
+async def upsell_kb():
+    """Клавиатура тарифов: с кнопкой триала, если он ещё не использован."""
+    from keyboards.subscription_kb import plans_kb
+    from services import subscription as sub_service
+
+    oid = owner_id()
+    show_trial = False
+    if oid is not None:
+        sub = await sub_service.get_subscription(oid)
+        show_trial = (not sub.trial_used) and sub.plan == sub_service.Plan.FREE
+    return plans_kb(show_trial=show_trial)
+
+
+async def require_feature(callback: CallbackQuery, feature: str) -> bool:
+    """Тарифный гейт: False = функция закрыта, показан апсейл.
+
+    На Free закрыта только аналитика; рассылки и ДЗ доступны с лимитами
+    (10 сообщений/день, 5 ДЗ/мес), PRO — безлимит.
+    """
+    oid = owner_id()
+    if oid is None:
+        return True
+    from services import subscription as sub_service
+
+    if await sub_service.feature_enabled(oid, feature):
+        return True
+    await callback.answer()
+    await callback.message.edit_text(
+        "🔒 <b>Функция доступна на тарифе PRO</b> (990 ₽/мес)\n\n"
+        "На Free: до 5 учеников, рассылки до 10 сообщений в день,\n"
+        "ДЗ до 5 в месяц, без аналитики.\n"
+        "PRO снимает все лимиты.\n\n"
+        "Можно начать с 7 бесплатных дней 👇",
+        reply_markup=await upsell_kb(),
+    )
+    return False
+
+
 # =================== RATE LIMITING ===================
 _failed_attempts: dict[int, int] = {}
 _locked_until: dict[int, datetime] = {}

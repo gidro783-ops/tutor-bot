@@ -14,10 +14,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import db
 from keyboards.admin_kb import back_button
+from keyboards.subscription_kb import cancel_flow_kb
 from services.userbot import userbot
-from utils.helpers import escape_html
+from utils.helpers import escape_html, is_cancel
 
-from .core import check_admin
+from .core import check_admin, owner_id, upsell_kb
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -38,6 +39,7 @@ class UserbotMailing(StatesGroup):
 async def admin_userbot_menu(callback: CallbackQuery, state: FSMContext):
     if not await check_admin(callback):
         return
+    # Доступно и на Free — лимит 10 сообщений/день проверяется при отправке
     if userbot.is_connected:
         me = None
         try:
@@ -121,9 +123,16 @@ async def userbot_login_other_phone(callback: CallbackQuery, state: FSMContext):
     if not await check_admin(callback):
         return
     await state.set_state(UserbotLogin.phone)
-    await callback.message.edit_text("📱 Введите номер телефона (например +79991234567):")
+    await callback.message.edit_text(
+        "📱 Введите номер телефона (например +79991234567):",
+        reply_markup=cancel_flow_kb(),
+    )
 @router.message(UserbotLogin.phone)
 async def userbot_login_phone(message: Message, state: FSMContext):
+    if is_cancel(message.text):
+        await state.clear()
+        await message.answer("❌ Авторизация отменена.")
+        return
     phone = message.text.strip()
     if not phone.startswith("+"):
         # v3: подставляем + автоматически, если ученик-админ ввёл без него
@@ -149,6 +158,10 @@ async def userbot_login_phone(message: Message, state: FSMContext):
         await message.answer(f"❌ {escape_html(err)}\n\nВведите номер ещё раз:")
 @router.message(UserbotLogin.code)
 async def userbot_login_code(message: Message, state: FSMContext):
+    if is_cancel(message.text):
+        await state.clear()
+        await message.answer("❌ Авторизация отменена.")
+        return
     data = await state.get_data()
     phone = data.get("phone", "")
     phone_code_hash = data.get("phone_code_hash") or userbot.phone_code_hash
@@ -187,6 +200,10 @@ async def userbot_login_code(message: Message, state: FSMContext):
 @router.message(UserbotLogin.password)
 async def userbot_login_password(message: Message, state: FSMContext):
     # v3: завершение входа для аккаунтов с 2FA
+    if is_cancel(message.text):
+        await state.clear()
+        await message.answer("❌ Авторизация отменена.")
+        return
     ok, err = await userbot.finish_2fa(message.text.strip())
     if ok:
         await state.clear()
@@ -293,10 +310,15 @@ async def userbot_add_chat_start(callback: CallbackQuery, state: FSMContext):
         "Введите username чата или канала:\n"
         "• @my_channel\n"
         "• my_channel (без @ тоже работает)\n\n"
-        "Работает только для <b>публичных</b> групп и каналов."
+        "Работает только для <b>публичных</b> групп и каналов.",
+        reply_markup=cancel_flow_kb(),
     )
 @router.message(UserbotAddChat.username)
 async def userbot_add_chat_username(message: Message, state: FSMContext):
+    if is_cancel(message.text):
+        await state.clear()
+        await message.answer("❌ Добавление чата отменено.")
+        return
     username = message.text.strip().lstrip("@")
     if not username:
         await message.answer("❌ Введите username (например @my_channel):")
@@ -346,10 +368,15 @@ async def userbot_mailing_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "📢 <b>Рассылка от имени репетитора</b>\n\n"
         "Введите текст рассылки:\n\n"
-        "⚠️ Сообщения отправляются с задержкой 5-30 сек между чатами."
+        "⚠️ Сообщения отправляются с задержкой 5-30 сек между чатами.",
+        reply_markup=cancel_flow_kb(),
     )
 @router.message(UserbotMailing.text)
 async def userbot_mailing_text(message: Message, state: FSMContext):
+    if is_cancel(message.text):
+        await state.clear()
+        await message.answer("❌ Рассылка отменена.")
+        return
     text = message.text
     if not text or len(text) > 4096:
         await message.answer("❌ Текст от 1 до 4096 символов:")
@@ -508,6 +535,22 @@ async def userbot_mail_send(callback: CallbackQuery, state: FSMContext):
     if not chat_ids or not mail_text:
         await callback.message.edit_text("❌ Нет данных для рассылки.")
         return
+    # Тарифный лимит Free: N сообщений в день
+    from services import subscription as sub_service
+
+    owner = owner_id()
+    if owner is not None:
+        left = await sub_service.mailing_left_today(owner)
+        if left is not None and len(chat_ids) > left:
+            await callback.message.edit_text(
+                f"🚫 <b>Лимит бесплатного тарифа</b>\n\n"
+                f"Сегодня можно отправить ещё {left} сообщений, "
+                f"а выбрано чатов — {len(chat_ids)}.\n\n"
+                f"PRO (990 ₽/мес) снимает лимиты. "
+                f"Или начните с 7 бесплатных дней 👇",
+                reply_markup=await upsell_kb(),
+            )
+            return
     await callback.message.edit_text(
         f"📤 <b>Рассылка идёт...</b>\n\n"
         f"💬 Чатов: {len(chat_ids)}\n"
@@ -520,6 +563,8 @@ async def userbot_mail_send(callback: CallbackQuery, state: FSMContext):
     )
     sent = result["sent"]
     errors = result["errors"]
+    if owner is not None and sent:
+        await sub_service.consume_mailing(owner, sent)
     builder = InlineKeyboardBuilder()
     builder.button(text="◀️ К рассылкам", callback_data="admin:mailings")
     builder.adjust(1)

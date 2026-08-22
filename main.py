@@ -13,6 +13,7 @@ from services.scheduler import BotScheduler
 from middlewares.auth import DndMiddleware, ActivityMiddleware
 from middlewares.error_handler import ErrorHandlerMiddleware
 from handlers import (
+    common_router,
     admin_router,
     student_router,
     booking_router,
@@ -23,7 +24,9 @@ from handlers import (
     mailing_router,
     referral_router,
     fixes_router,
+    subscription_router,
 )
+from services.subscription import init_db as init_subscriptions
 async def healthcheck(request):
     return web.Response(text="OK")
 async def start_web_server():
@@ -51,6 +54,7 @@ async def main():
         stream=sys.stdout
     )
     await db.connect()
+    await init_subscriptions()  # таблица тарифов (Free/PRO/White Label)
     # Подключаем userbot (если есть сохраненная сессия)
     try:
         await userbot.connect()
@@ -65,6 +69,8 @@ async def main():
     dp.message.middleware(ActivityMiddleware())
     dp.message.middleware(DndMiddleware())
     dp.errors.middleware(ErrorHandlerMiddleware())
+    dp.include_router(common_router)  # /cancel — до всех сценариев
+    dp.include_router(subscription_router)
     dp.include_router(admin_router)
     dp.include_router(fixes_router)
     dp.include_router(booking_router)

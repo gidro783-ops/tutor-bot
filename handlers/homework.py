@@ -151,6 +151,25 @@ async def admin_hw_due_date(message: Message, state: FSMContext):
             await message.answer(f"❌ {e}\n\nВведите дату ещё раз:")
             return
     data = await state.get_data()
+    # Тарифный лимит Free: N заданий в месяц
+    from config import config
+
+    if config.ADMIN_IDS:
+        from handlers.admin.core import owner_id, upsell_kb
+        from services import subscription as sub_service
+
+        owner = owner_id()
+        left = await sub_service.homework_left_this_month(owner)
+        if left is not None and left <= 0:
+            await state.clear()
+            await message.answer(
+                "🚫 <b>Лимит бесплатного тарифа</b>\n\n"
+                "В этом месяце все 5 ДЗ уже заданы.\n"
+                "PRO (990 ₽/мес) — безлимитные ДЗ. "
+                "Или начните с 7 бесплатных дней 👇",
+                reply_markup=await upsell_kb(),
+            )
+            return
     try:
         await db.db.execute(
             """INSERT INTO homework (student_id, title, description, due_date, status)
@@ -159,6 +178,11 @@ async def admin_hw_due_date(message: Message, state: FSMContext):
         )
         await db.db.commit()
         await state.clear()
+        # списываем ДЗ из месячной квоты тарифа
+        if config.ADMIN_IDS:
+            from services import subscription as sub_service
+
+            await sub_service.consume_homework(config.ADMIN_IDS[0])
         # Уведомляем ученика
         try:
             await message.bot.send_message(
