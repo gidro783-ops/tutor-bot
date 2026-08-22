@@ -19,6 +19,7 @@ from services.userbot import userbot
 from utils.helpers import escape_html, is_cancel
 
 from .core import check_admin, owner_id, upsell_kb
+from services.cleanup import say
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -148,7 +149,7 @@ async def userbot_login_other_phone(callback: CallbackQuery, state: FSMContext):
 async def userbot_login_phone(message: Message, state: FSMContext):
     if is_cancel(message.text):
         await state.clear()
-        await message.answer("❌ Авторизация отменена.")
+        await say(message, "❌ Авторизация отменена.")
         return
     phone = message.text.strip()
     if not phone.startswith("+"):
@@ -156,7 +157,7 @@ async def userbot_login_phone(message: Message, state: FSMContext):
         # (например 15551234567 для американского номера)
         digits = "".join(ch for ch in phone if ch.isdigit())
         if len(digits) < 5:
-            await message.answer("❌ Номер с + (например +79991234567):")
+            await say(message, "❌ Номер с + (например +79991234567):")
             return
         phone = "+" + digits
     ok, err = await userbot.send_code_request(phone)
@@ -166,14 +167,14 @@ async def userbot_login_phone(message: Message, state: FSMContext):
             phone_code_hash=userbot.phone_code_hash
         )
         await state.set_state(UserbotLogin.code)
-        await message.answer(
+        await say(message, 
             f"📩 Код отправлен в Telegram на номер {phone}\n\n"
             f"Введите 5-значный код подтверждения:" + CODE_HINT,
             reply_markup=_code_prompt_kb(),
         )
     else:
         # v3: реальная причина ошибки + можно попробовать снова
-        await message.answer(f"❌ {escape_html(err)}\n\nВведите номер ещё раз:")
+        await say(message, f"❌ {escape_html(err)}\n\nВведите номер ещё раз:")
 @router.callback_query(F.data == "ub:login:sms")
 async def userbot_login_sms(callback: CallbackQuery, state: FSMContext):
     """Повторная отправка кода СМС-кой: для +1 и подобных номеров
@@ -209,7 +210,7 @@ async def userbot_login_sms(callback: CallbackQuery, state: FSMContext):
 async def userbot_login_code(message: Message, state: FSMContext):
     if is_cancel(message.text):
         await state.clear()
-        await message.answer("❌ Авторизация отменена.")
+        await say(message, "❌ Авторизация отменена.")
         return
     data = await state.get_data()
     phone = data.get("phone", "")
@@ -227,7 +228,7 @@ async def userbot_login_code(message: Message, state: FSMContext):
         except Exception:
             pass
         name = escape_html(me.first_name) if me else "—"
-        await message.answer(
+        await say(message, 
             f"✅ Userbot авторизован: {name}\n\n"
             f"Теперь можно делать рассылку от вашего имени.\n\n"
             f"⚠️ Помните о риске бана!"
@@ -238,7 +239,7 @@ async def userbot_login_code(message: Message, state: FSMContext):
         # он включён по умолчанию в некоторых настройках)
         await state.update_data(phone=phone)
         await state.set_state(UserbotLogin.password)
-        await message.answer(
+        await say(message, 
             "🔐 У этого аккаунта включён двухступенчатый пароль.\n\n"
             "Введите пароль Telegram (не код, а тот, что задаётся в "
             "Настройки → Конфиденциальность → Дополнительный пароль):"
@@ -253,7 +254,7 @@ async def userbot_login_code(message: Message, state: FSMContext):
                     phone=phone, phone_code_hash=userbot.phone_code_hash
                 )
                 await state.set_state(UserbotLogin.code)
-                await message.answer(
+                await say(message, 
                     "⌛ Этот код уже недействителен (обычно Telegram "
                     "присылал несколько кодов или код запрашивали "
                     "повторно).\n\n"
@@ -262,19 +263,19 @@ async def userbot_login_code(message: Message, state: FSMContext):
                     reply_markup=_code_prompt_kb(),
                 )
                 return
-        await message.answer(
+        await say(message, 
             "⌛ Код недействителен. Нажмите «🔑 Авторизоваться» — "
             "придёт новый код, и введите его сразу."
         )
     else:
         # v3: настоящая причина, а не «Неверный код»
-        await message.answer(f"❌ {escape_html(err)}\n\nВведите код ещё раз:")
+        await say(message, f"❌ {escape_html(err)}\n\nВведите код ещё раз:")
 @router.message(UserbotLogin.password)
 async def userbot_login_password(message: Message, state: FSMContext):
     # v3: завершение входа для аккаунтов с 2FA
     if is_cancel(message.text):
         await state.clear()
-        await message.answer("❌ Авторизация отменена.")
+        await say(message, "❌ Авторизация отменена.")
         return
     ok, err = await userbot.finish_2fa(message.text.strip())
     if ok:
@@ -285,14 +286,14 @@ async def userbot_login_password(message: Message, state: FSMContext):
         except Exception:
             pass
         name = escape_html(me.first_name) if me else "—"
-        await message.answer(
+        await say(message, 
             f"✅ Userbot авторизован: {name}\n\n"
             f"Теперь можно делать рассылку от вашего имени.\n\n"
             f"⚠️ Помните о риске бана!"
         )
         await db.log_action(message.from_user.id, "userbot_authorized")
     else:
-        await message.answer(f"❌ {escape_html(err)}\n\nВведите пароль ещё раз:")
+        await say(message, f"❌ {escape_html(err)}\n\nВведите пароль ещё раз:")
 # ===== v3: СМЕНА АККАУНТА USERBOT =====
 @router.callback_query(F.data == "ub:switch")
 async def userbot_switch_ask(callback: CallbackQuery, state: FSMContext):
@@ -447,17 +448,17 @@ async def userbot_mailing_start(callback: CallbackQuery, state: FSMContext):
 async def userbot_mailing_text(message: Message, state: FSMContext):
     if is_cancel(message.text):
         await state.clear()
-        await message.answer("❌ Рассылка отменена.")
+        await say(message, "❌ Рассылка отменена.")
         return
     text = message.text
     if not text or len(text) > 4096:
-        await message.answer("❌ Текст от 1 до 4096 символов:")
+        await say(message, "❌ Текст от 1 до 4096 символов:")
         return
     await state.update_data(mail_text=text, selected_chats=[])
     chats = await userbot.get_chats(limit=50)
     if not chats:
         await state.clear()
-        await message.answer("❌ Нет доступных чатов. Добавьте по @username.")
+        await say(message, "❌ Нет доступных чатов. Добавьте по @username.")
         return
     db_chats = await db.get_ad_chats()
     all_chats = list(chats)

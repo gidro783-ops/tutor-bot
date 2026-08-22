@@ -13,6 +13,7 @@ from keyboards.subscription_kb import cancel_flow_kb
 from utils.helpers import escape_html, is_cancel
 
 from .core import check_admin
+from services.cleanup import say
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -62,30 +63,30 @@ async def admin_add_subject(callback: CallbackQuery, state: FSMContext):
 async def add_subject_name(message: Message, state: FSMContext):
     if is_cancel(message.text):
         await state.clear()
-        await message.answer("❌ Добавление предмета отменено.")
+        await say(message, "❌ Добавление предмета отменено.")
         return
     name = message.text.strip()
     if not name or len(name) > 200:
-        await message.answer("❌ Название от 1 до 200 символов:")
+        await say(message, "❌ Название от 1 до 200 символов:")
         return
     await state.update_data(name=name)
     await state.set_state(AddSubject.price)
-    await message.answer("💰 Цена за час (число):")
+    await say(message, "💰 Цена за час (число):")
 @router.message(AddSubject.price)
 async def add_subject_price(message: Message, state: FSMContext):
     from utils.helpers import validate_amount
     if is_cancel(message.text):
         await state.clear()
-        await message.answer("❌ Добавление предмета отменено.")
+        await say(message, "❌ Добавление предмета отменено.")
         return
     try:
         price = validate_amount(message.text)
     except ValueError as e:
-        await message.answer(f"❌ {e}\n\nЕщё раз:")
+        await say(message, f"❌ {e}\n\nЕщё раз:")
         return
     await state.update_data(price=price)
     await state.set_state(AddSubject.description)
-    await message.answer("📋 Описание (или «-» без описания):")
+    await say(message, "📋 Описание (или «-» без описания):")
 @router.message(AddSubject.description)
 async def add_subject_description(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -93,8 +94,8 @@ async def add_subject_description(message: Message, state: FSMContext):
     try:
         await db.add_subject(name=data["name"], price=data["price"], description=desc)
         await state.clear()
-        await message.answer(f"✅ Предмет <b>{escape_html(data['name'])}</b> добавлен!")
+        await say(message, f"✅ Предмет <b>{escape_html(data['name'])}</b> добавлен!")
     except Exception as e:
         logger.error(f"Failed to add subject: {e}")
         await state.clear()
-        await message.answer("❌ Ошибка. Возможно, предмет уже существует.")
+        await say(message, "❌ Ошибка. Возможно, предмет уже существует.")

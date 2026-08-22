@@ -7,6 +7,7 @@ from keyboards.student_kb import payment_keyboard
 from utils.helpers import escape_html, validate_amount
 from config import config
 import logging
+from services.cleanup import say
 logger = logging.getLogger(__name__)
 router = Router()
 class CreatePaymentAdmin(StatesGroup):
@@ -85,11 +86,11 @@ async def admin_pay_amount(message: Message, state: FSMContext):
     try:
         amount = validate_amount(message.text)
     except ValueError as e:
-        await message.answer(f"❌ {e}\n\nВведите сумму ещё раз:")
+        await say(message, f"❌ {e}\n\nВведите сумму ещё раз:")
         return
     await state.update_data(amount=amount)
     await state.set_state(CreatePaymentAdmin.description)
-    await message.answer("📋 Введите описание (или «-» без описания):")
+    await say(message, "📋 Введите описание (или «-» без описания):")
 @router.message(CreatePaymentAdmin.description)
 async def admin_pay_description(message: Message, state: FSMContext):
     desc = "" if message.text.strip() == "-" else message.text.strip()
@@ -113,11 +114,11 @@ async def admin_pay_description(message: Message, state: FSMContext):
             )
         except Exception as e:
             logger.warning(f"Failed to notify student about payment: {e}")
-        await message.answer(f"✅ Счёт #{pay_id} создан: {data['amount']}₽")
+        await say(message, f"✅ Счёт #{pay_id} создан: {data['amount']}₽")
     except Exception as e:
         logger.error(f"Failed to create payment: {e}")
         await state.clear()
-        await message.answer("❌ Ошибка при создании счёта.")
+        await say(message, "❌ Ошибка при создании счёта.")
 # =================== АДМИН: отметить оплаченным ===================
 @router.callback_query(F.data.startswith("admin:pay:mark:"))
 async def admin_mark_paid(callback: CallbackQuery):

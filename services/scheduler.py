@@ -7,6 +7,7 @@ from aiogram import Bot
 
 from services.notification import (
     send_booking_reminders,
+    send_homework_deadline_reminders,
     send_morning_summary,
     send_payment_reminders,
 )
@@ -46,6 +47,14 @@ class BotScheduler:
             trigger=CronTrigger(hour=10, minute=0),
             args=[self.bot],
             id="payment_reminders",
+            replace_existing=True,
+        )
+        # Дедлайн ДЗ «завтра» — ученикам (час настраивается HW_REMINDER_HOUR)
+        self.scheduler.add_job(
+            send_homework_deadline_reminders,
+            trigger=CronTrigger(hour=config.HW_REMINDER_HOUR, minute=30),
+            args=[self.bot],
+            id="hw_deadline_reminders",
             replace_existing=True,
         )
         # Генерация повторяющихся слотов ежедневно в 00:05

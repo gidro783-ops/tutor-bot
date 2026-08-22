@@ -19,6 +19,7 @@ from keyboards.subscription_kb import cancel_flow_kb
 from services import ai_assistant, subscription as sub_service
 
 from .core import check_admin
+from services.cleanup import say
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -180,7 +181,7 @@ async def ai_save_field(message: Message, state: FSMContext):
 
     if is_cancel(message.text):
         await state.clear()
-        await message.answer("❌ Редактирование отменено.")
+        await say(message, "❌ Редактирование отменено.")
         return
     data = await state.get_data()
     key = data.get("ai_field")
@@ -189,7 +190,7 @@ async def ai_save_field(message: Message, state: FSMContext):
         return
     value = message.text.strip()
     if not value or len(value) > 3000:
-        await message.answer("❌ Текст от 1 до 3000 символов. Попробуйте ещё раз:")
+        await say(message, "❌ Текст от 1 до 3000 символов. Попробуйте ещё раз:")
         return
     if key == ai_assistant.KB_STYLE and value == "-":
         value = ""  # «-» в стиле = вернуть стиль по умолчанию
@@ -198,7 +199,7 @@ async def ai_save_field(message: Message, state: FSMContext):
     if await db.get_setting(ai_assistant.KB_ENABLED, "0") != "1" and config.AI_API_KEY:
         await db.set_setting(ai_assistant.KB_ENABLED, "1")
     await state.clear()
-    await message.answer("✅ Сохранено. ИИ будет использовать это в ответах.")
+    await say(message, "✅ Сохранено. ИИ будет использовать это в ответах.")
     await _show_ai_settings(message)
 
 
@@ -290,11 +291,11 @@ async def ai_skip_save(message: Message, state: FSMContext):
 
     if is_cancel(message.text):
         await state.clear()
-        await message.answer("❌ Добавление отменено.")
+        await say(message, "❌ Добавление отменено.")
         return
     username = (message.text or "").strip().lstrip("@")
     if not username or len(username) > 64:
-        await message.answer("❌ Введите @username (до 64 символов):")
+        await say(message, "❌ Введите @username (до 64 символов):")
         return
     user_id = None
     if ub.is_connected:
@@ -305,7 +306,7 @@ async def ai_skip_save(message: Message, state: FSMContext):
             logger.info("skip-add: не удалось resolve @%s: %s", username, e)
     await ai_replies.add_skip(user_id, username)
     await state.clear()
-    await message.answer(
+    await say(message, 
         f"✅ Добавлено: @{username}"
         + (f" (ID: <code>{user_id}</code>)" if user_id else "")
         + "\nИИ больше не будет отвечать этому человеку в ЛС."

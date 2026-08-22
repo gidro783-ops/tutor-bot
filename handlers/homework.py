@@ -7,6 +7,7 @@ from keyboards.student_kb import homework_list_keyboard
 from utils.helpers import escape_html
 from config import config
 import logging
+from services.cleanup import say
 logger = logging.getLogger(__name__)
 router = Router()
 class SubmitHomework(StatesGroup):
@@ -128,17 +129,17 @@ async def admin_hw_select_student(callback: CallbackQuery, state: FSMContext):
 async def admin_hw_title(message: Message, state: FSMContext):
     title = message.text.strip()
     if not title or len(title) > 500:
-        await message.answer("❌ Название от 1 до 500 символов:")
+        await say(message, "❌ Название от 1 до 500 символов:")
         return
     await state.update_data(title=title)
     await state.set_state(AddHomeworkAdmin.description)
-    await message.answer("📋 Введите описание (или «-» чтобы пропустить):")
+    await say(message, "📋 Введите описание (или «-» чтобы пропустить):")
 @router.message(AddHomeworkAdmin.description)
 async def admin_hw_description(message: Message, state: FSMContext):
     desc = "" if message.text.strip() == "-" else message.text.strip()
     await state.update_data(description=desc)
     await state.set_state(AddHomeworkAdmin.due_date)
-    await message.answer("📅 Введите дедлайн YYYY-MM-DD (или «-» без дедлайна):")
+    await say(message, "📅 Введите дедлайн YYYY-MM-DD (или «-» без дедлайна):")
 @router.message(AddHomeworkAdmin.due_date)
 async def admin_hw_due_date(message: Message, state: FSMContext):
     from utils.helpers import validate_date
@@ -148,7 +149,7 @@ async def admin_hw_due_date(message: Message, state: FSMContext):
         try:
             due = validate_date(text)
         except ValueError as e:
-            await message.answer(f"❌ {e}\n\nВведите дату ещё раз:")
+            await say(message, f"❌ {e}\n\nВведите дату ещё раз:")
             return
     data = await state.get_data()
     # Тарифный лимит Free: N заданий в месяц
@@ -162,7 +163,7 @@ async def admin_hw_due_date(message: Message, state: FSMContext):
         left = await sub_service.homework_left_this_month(owner)
         if left is not None and left <= 0:
             await state.clear()
-            await message.answer(
+            await say(message, 
                 "🚫 <b>Лимит бесплатного тарифа</b>\n\n"
                 "В этом месяце все 5 ДЗ уже заданы.\n"
                 "PRO (990 ₽/мес) — безлимитные ДЗ. "
@@ -194,11 +195,11 @@ async def admin_hw_due_date(message: Message, state: FSMContext):
             )
         except Exception as e:
             logger.warning(f"Failed to notify student about new HW: {e}")
-        await message.answer(f"✅ ДЗ <b>{escape_html(data['title'])}</b> задано!")
+        await say(message, f"✅ ДЗ <b>{escape_html(data['title'])}</b> задано!")
     except Exception as e:
         logger.error(f"Failed to create homework: {e}")
         await state.clear()
-        await message.answer("❌ Ошибка при создании ДЗ.")
+        await say(message, "❌ Ошибка при создании ДЗ.")
 # =================== АДМИН: оценить ДЗ ===================
 @router.callback_query(F.data.startswith("admin:hw:grade:"))
 async def admin_grade_hw_start(callback: CallbackQuery, state: FSMContext):

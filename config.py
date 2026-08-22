@@ -81,6 +81,14 @@ class Config:
     AI_BASE_URL: str = os.getenv("AI_BASE_URL", "https://api.deepseek.com/v1")
     AI_MODEL: str = os.getenv("AI_MODEL", "deepseek-chat")
 
+    # === Служебные сообщения ===
+    # Через сколько минут удалять промпты/подтверждения из чата
+    # (запросы кодов, «введите название», «✅ сохранено»…). 0 = не удалять.
+    MESSAGE_TTL_MINUTES: float = float(os.getenv("MESSAGE_TTL_MINUTES", "3"))
+
+    # === Напоминание о дедлайне ДЗ (ежедневно, час по местному времени) ===
+    HW_REMINDER_HOUR: int = int(os.getenv("HW_REMINDER_HOUR", "11"))
+
     # === БЕЗОПАСНОСТЬ: ключ шифрования ОБЯЗАТЕЛЬНО задавать в .env ===
     # Генерация: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     _raw_key = os.getenv("ENCRYPTION_KEY", "")

@@ -18,6 +18,7 @@ from keyboards.subscription_kb import (
 from services import subscription as sub_service
 from services.subscription import PLANS, Plan, TRIAL_DAYS
 from utils.helpers import is_cancel
+from services.cleanup import say
 
 logger = logging.getLogger(__name__)
 router = Router(name="subscription")
@@ -152,10 +153,10 @@ async def on_paid(message: Message):
 @router.message(Command("brand"))
 async def brand_start(message: Message, state: FSMContext):
     if not await sub_service.feature_enabled(message.from_user.id, "white_label"):
-        await message.answer("Брендинг доступен только на тарифе White Label.")
+        await say(message, "Брендинг доступен только на тарифе White Label.")
         return
     await state.set_state(BrandStates.name)
-    await message.answer(
+    await say(message, 
         "Введите название бренда (имя, которое увидят ученики):",
         reply_markup=cancel_flow_kb(),
     )
@@ -165,11 +166,11 @@ async def brand_start(message: Message, state: FSMContext):
 async def brand_name(message: Message, state: FSMContext):
     if is_cancel(message.text):
         await state.clear()
-        await message.answer("❌ Настройка бренда отменена.")
+        await say(message, "❌ Настройка бренда отменена.")
         return
     await state.update_data(name=message.text.strip())
     await state.set_state(BrandStates.about)
-    await message.answer(
+    await say(message, 
         "Короткое описание (или '-' чтобы пропустить):",
         reply_markup=cancel_flow_kb(),
     )
@@ -179,10 +180,10 @@ async def brand_name(message: Message, state: FSMContext):
 async def brand_about(message: Message, state: FSMContext):
     if is_cancel(message.text):
         await state.clear()
-        await message.answer("❌ Настройка бренда отменена.")
+        await say(message, "❌ Настройка бренда отменена.")
         return
     data = await state.get_data()
     about = None if message.text.strip() == "-" else message.text.strip()
     await sub_service.set_brand(message.from_user.id, data["name"], about)
     await state.clear()
-    await message.answer(f"✅ Бренд сохранён: <b>{data['name']}</b>")
+    await say(message, f"✅ Бренд сохранён: <b>{data['name']}</b>")

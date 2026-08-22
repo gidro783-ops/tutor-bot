@@ -8,6 +8,7 @@ from keyboards.admin_kb import back_button
 from utils.helpers import escape_html, truncate_text
 import asyncio
 import logging
+from services.cleanup import say
 logger = logging.getLogger(__name__)
 router = Router()
 class NewMailingFlow(StatesGroup):
@@ -24,7 +25,7 @@ async def start_mailing(callback: CallbackQuery, state: FSMContext):
 async def mailing_text(message: Message, state: FSMContext):
     text = message.text
     if not text or len(text) > 4096:
-        await message.answer("❌ Текст от 1 до 4096 символов:")
+        await say(message, "❌ Текст от 1 до 4096 символов:")
         return
     await state.update_data(text=text)
     await state.set_state(NewMailingFlow.target)
@@ -34,7 +35,7 @@ async def mailing_text(message: Message, state: FSMContext):
     builder.button(text="💤 Неактивные", callback_data="mail:target:inactive")
     builder.button(text="❌ Отмена", callback_data="mail:cancel")
     builder.adjust(1)
-    await message.answer("Кому отправить?", reply_markup=builder.as_markup())
+    await say(message, "Кому отправить?", reply_markup=builder.as_markup())
 @router.callback_query(F.data.startswith("mail:target:"))
 async def mailing_target(callback: CallbackQuery, state: FSMContext):
     target = callback.data.split(":")[-1]

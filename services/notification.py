@@ -158,3 +158,37 @@ async def send_post_trial_review_request(bot: Bot, booking_id: int):
         )
     except Exception as e:
         logger.error(f"[send_post_trial_review_request] Failed to send to student: {e}")
+
+
+async def send_homework_deadline_reminders(bot: Bot):
+    """Ежедневное напоминание ученикам: ДЗ сдаётся завтра.
+
+    Приходит по каждому невыполненному заданию с дедлайном «завтра»
+    (status='assigned'). Тексты — без давления, но с дедлайном.
+    """
+    from datetime import date, timedelta
+
+    try:
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        items = await db.get_homework_due(tomorrow)
+    except Exception as e:
+        logger.error(f"[hw_deadline_reminders] Failed: {e}")
+        return
+    sent = 0
+    for hw in items:
+        try:
+            title = hw.get("title") or "задание"
+            await bot.send_message(
+                hw["student_id"],
+                f"📝 <b>Дедлайн завтра</b>\n\n"
+                f"{escape_html(title[:100])}\n"
+                f"📅 Сдать до: {hw.get('due_date')}\n\n"
+                f"Успеешь? Если нужна помощь — напиши, разберём вместе.",
+            )
+            sent += 1
+        except Exception as e:
+            logger.warning(
+                "[hw_deadline_reminders] %s: %s", hw.get("student_id"), e
+            )
+    if sent:
+        logger.info(f"[hw_deadline_reminders] отправлено {sent} напоминаний")

@@ -632,20 +632,20 @@ class Database:
         """
         try:
             from zoneinfo import ZoneInfo
-            now = datetime.now(ZoneInfo(config.TIMEZONE))
+            tz = ZoneInfo(config.TIMEZONE)
+            now = datetime.now(tz)
             today = now.date().isoformat()
+            tomorrow = (now.date() + timedelta(days=1)).isoformat()
             # Окно шириной 10 минут, нацеленное на момент "+minutes_ahead":
             # напоминание «за 60 минут» — для занятий, начинающихся
             # через 50–60 минут; «за 15» — через 5–15 минут.
             # Запись за 1 минуту до начала не попадает ни в одно окно.
             window_min = now + timedelta(minutes=minutes_ahead - 10)
             window_max = now + timedelta(minutes=minutes_ahead)
-            # Окно, пересекающее полночь, не обрабатываем
-            if (window_max.date() != now.date()
-                    or window_min.date() != now.date()):
-                return []
-            lower_time = window_min.strftime("%H:%M")
-            upper_time = window_max.strftime("%H:%M")
+            # ИСПРАВЛЕНО: раньше окно, пересекающее полночь, просто
+            # игнорировалось (return []) — напоминания для занятий сразу
+            # после 00:00 никогда не приходили. Теперь берём слоты за
+            # сегодня и завтра и сравниваем полные дата+время.
             cursor = await self.db.execute(
                 """SELECT b.*, ts.date, ts.start_time, ts.end_time,
                           s.name as subject_name,
@@ -655,15 +655,22 @@ class Database:
                    LEFT JOIN time_slots ts ON b.slot_id = ts.id
                    LEFT JOIN subjects s ON b.subject_id = s.id
                    LEFT JOIN students st ON b.student_id = st.user_id
-                   WHERE ts.date = ?
-                   AND ts.start_time BETWEEN ? AND ?
+                   WHERE ts.date IN (?, ?)
                    AND b.status IN ('pending', 'confirmed')""",
-                (today, lower_time, upper_time)
+                (today, tomorrow)
             )
             rows = await cursor.fetchall()
             result = []
             for r in rows:
                 d = dict(r)
+                try:
+                    slot_dt = datetime.fromisoformat(
+                        f"{d['date']}T{d['start_time'][:5]}:00"
+                    ).replace(tzinfo=tz)
+                except (ValueError, TypeError):
+                    continue
+                if not (window_min <= slot_dt <= window_max):
+                    continue
                 try:
                     sent = json.loads(d.get("reminders_sent") or "[]")
                 except (ValueError, TypeError):
@@ -781,6 +788,22 @@ class Database:
             return result
         except Exception as e:
             logger.error(f"[get_student_homework] Failed: {e}")
+            return []
+    async def get_homework_due(self, due_date: str) -> list:
+        """Невыполненные ДЗ с дедлайном на указанную дату (status='assigned')."""
+        try:
+            cursor = await self.db.execute(
+                """SELECT h.*, st.full_name, st.username
+                   FROM homework h
+                   LEFT JOIN students st ON h.student_id = st.user_id
+                   WHERE h.due_date = ? AND h.status = 'assigned'
+                   ORDER BY st.full_name""",
+                (due_date,)
+            )
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"[get_homework_due] Failed: {e}")
             return []
     async def get_homework_by_id(self, hw_id: int) -> Optional[dict]:
         """НОВЫЙ МЕТОД: получить ДЗ по ID."""

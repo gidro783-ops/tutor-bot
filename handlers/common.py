@@ -11,6 +11,7 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from services.cleanup import say
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -34,7 +35,7 @@ async def _finish(message_or_cb, state: FSMContext):
 async def cmd_cancel(message: Message, state: FSMContext):
     data = await state.get_data()
     if not data and (await state.get_state()) is None:
-        await message.answer("Нечего отменять 🙂")
+        await say(message, "Нечего отменять 🙂")
         return
     await _finish(message, state)
 

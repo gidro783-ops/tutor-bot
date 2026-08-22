@@ -114,23 +114,25 @@ except ImportError:
 async def main():
     await db.connect()
     now = datetime.now(TZ)
-    date_str = now.date().isoformat()
     t = lambda dt: dt.strftime("%H:%M")
+    # дата каждого слота — его собственная: «через 55 минут» после
+    # 23:10 — это уже завтра, окно напоминания переходит полночь
+    d = lambda dt: dt.date().isoformat()
 
     await db.add_student(111, "Тест Учеников", username="test_u")
     await db.add_subject("Математика", 1500)
     subj = (await db.get_subjects())[0]
 
     a_start = now + timedelta(minutes=55)   # окно «за 60» → [+50, +60]
-    await db.add_time_slot(date_str, t(a_start), t(a_start + timedelta(minutes=30)))
+    await db.add_time_slot(d(a_start), t(a_start), t(a_start + timedelta(minutes=30)))
     b_start = now + timedelta(minutes=10)   # окно «за 15» → [+5, +15]
-    await db.add_time_slot(date_str, t(b_start), t(b_start + timedelta(minutes=30)))
+    await db.add_time_slot(d(b_start), t(b_start), t(b_start + timedelta(minutes=30)))
     c_start = now + timedelta(minutes=1)    # за минуту до начала: ни в одно окно
-    await db.add_time_slot(date_str, t(c_start), t(c_start + timedelta(minutes=30)))
+    await db.add_time_slot(d(c_start), t(c_start), t(c_start + timedelta(minutes=30)))
     slots = await db.get_available_slots()
-    slot_a = [s for s in slots if s["date"] == date_str and s["start_time"] == t(a_start)][0]
-    slot_b = [s for s in slots if s["date"] == date_str and s["start_time"] == t(b_start)][0]
-    slot_c = [s for s in slots if s["date"] == date_str and s["start_time"] == t(c_start)][0]
+    slot_a = [s for s in slots if s["date"] == d(a_start) and s["start_time"] == t(a_start)][0]
+    slot_b = [s for s in slots if s["date"] == d(b_start) and s["start_time"] == t(b_start)][0]
+    slot_c = [s for s in slots if s["date"] == d(c_start) and s["start_time"] == t(c_start)][0]
 
     print("\n[1] Напоминания (окна [X-10..X], без мгновенного спама)")
     ba = await db.create_booking(111, slot_a["id"], subj["id"], "trial")
@@ -198,7 +200,11 @@ async def main():
 
     print("\n[6] Утренняя сводка: pending-записи тоже считаются")
     today = await db.get_today_bookings()
-    ok("pending-запись на сегодня в списке 'сегодня'", any(b["id"] == ba for b in today))
+    if d(a_start) == now.date().isoformat():
+        ok("pending-запись на сегодня в списке 'сегодня'", any(b["id"] == ba for b in today))
+    else:
+        # около полуночи: занятие уже завтра — в «сегодня» его быть не должно
+        ok("запись за полночь не попадает в 'сегодня'", not any(b["id"] == ba for b in today))
 
     await db.close()
     print(f"\n✅ ВСЕ {PASS} ПРОВЕРОК ПРОЙДЕНО")

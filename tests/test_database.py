@@ -122,6 +122,21 @@ class TestPayments:
 
 
 class TestHomework:
+    def test_due_tomorrow_reminders(self, db):
+        run(db.add_student(100, "Иван"))
+        due_id = run(db.add_homework(100, "ДР на завтра", due_date=TOMORROW))
+        run(db.add_homework(100, "ДР на послезавтра",
+                            due_date=date.fromordinal(date.today().toordinal() + 2).isoformat()))
+        submitted = run(db.add_homework(100, "Сданное", due_date=TOMORROW))
+        run(db.submit_homework(submitted))
+
+        due = run(db.get_homework_due(TOMORROW))
+        ids = [h["id"] for h in due]
+        assert due_id in ids                    # дедлайн завтра, не сдано
+        assert submitted not in ids             # сданное не напоминаем
+        assert len([i for i in ids]) == 1       # послезавтрашнее не попало
+        assert due[0]["full_name"] == "Иван"    # имя для логов репетитора
+
     def test_assign_submit_grade(self, db):
         run(db.add_student(100, "Иван"))
         hw_id = run(db.add_homework(100, "ДР №5", due_date=TOMORROW))
