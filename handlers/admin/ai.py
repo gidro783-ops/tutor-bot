@@ -68,8 +68,9 @@ def _ai_menu_kb(enabled: bool, dm_enabled: bool) -> InlineKeyboardBuilder:
         callback_data="admin:ai:dm_toggle",
     )
     builder.button(text="🚫 Исключения (не отвечать)", callback_data="admin:ai:skip")
+    builder.button(text="🧪 Проверить ИИ", callback_data="admin:ai:test")
     builder.button(text="◀️ В меню", callback_data="admin:back")
-    builder.adjust(2, 1, 1, 1)
+    builder.adjust(2, 1, 1, 1, 1)
     return builder
 
 
@@ -297,3 +298,36 @@ async def ai_skip_save(message: Message, state: FSMContext):
         + (f" (ID: <code>{user_id}</code>)" if user_id else "")
         + "\nИИ больше не будет отвечать этому человеку в ЛС."
     )
+
+
+@router.callback_query(F.data == "admin:ai:test")
+async def ai_test(callback: CallbackQuery):
+    """Тестовый запрос к ИИ: сразу видно, работает ли ключ и модель."""
+    if not await check_admin(callback):
+        return
+    if not config.AI_API_KEY:
+        await callback.answer("AI_API_KEY не задан в .env", show_alert=True)
+        return
+    await callback.answer("Отправляю тестовый вопрос…")
+    await callback.message.answer(
+        f"🧪 Проверяю связь: <code>{config.AI_MODEL}</code>\n"
+        f"через {config.AI_BASE_URL} …"
+    )
+    try:
+        answer = await ai_assistant.answer_question(
+            "Здравствуйте! Подскажите, сколько стоит занятие?"
+        )
+        await callback.message.answer(
+            f"✅ <b>ИИ отвечает!</b>\n\n{answer}\n\n"
+            f"<i>Это тестовый ответ по вашей анкете и FAQ.</i>"
+        )
+    except ai_assistant.AiUnavailable as e:
+        await callback.message.answer(
+            f"❌ <b>ИИ не ответил:</b> {e}\n\n"
+            f"Проверьте:\n"
+            f"— AI_API_KEY (для OpenRouter начинается с sk-or-)\n"
+            f"— AI_BASE_URL (для OpenRouter: https://openrouter.ai/api/v1)\n"
+            f"— AI_MODEL — точный ID с openrouter.ai/models, "
+            f"например deepseek/deepseek-chat (без пробелов!)\n"
+            f"— есть ли деньги/кредиты на балансе провайдера"
+        )

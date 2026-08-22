@@ -33,3 +33,4 @@ __backup_before_fix_*
 .DS_Store
 Thumbs.db
 backup_update_*/
+backup_update_*/
