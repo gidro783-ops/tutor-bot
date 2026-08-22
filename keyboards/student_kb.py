@@ -7,6 +7,7 @@ def student_main_menu() -> ReplyKeyboardMarkup:
     buttons = [
         "📅 Записаться на занятие",
         "📋 Мои занятия",
+        "🤖 Спросить",
         "📝 Домашние задания",
         "💳 Оплата",
         "❓ FAQ",

@@ -33,6 +33,7 @@ class PlanInfo:
     # Лимиты Free-тарифа (None = безлимит на платных)
     max_mailing_per_day: int | None = None
     max_homework_per_month: int | None = None
+    max_ai_answers_per_day: int | None = None
 
 
 PLANS: dict[Plan, PlanInfo] = {
@@ -40,6 +41,7 @@ PLANS: dict[Plan, PlanInfo] = {
         Plan.FREE, "Free", 0, 5,
         homework=True, analytics=False, mailing=True, white_label=False,
         max_mailing_per_day=10, max_homework_per_month=5,
+        max_ai_answers_per_day=10,
     ),
     Plan.PRO: PlanInfo(Plan.PRO, "PRO", 990, None, True, True, True, False),
     Plan.WHITE_LABEL: PlanInfo(
@@ -92,10 +94,18 @@ async def init_db() -> None:
                 day        TEXT    NOT NULL,
                 mails_sent INTEGER NOT NULL DEFAULT 0,
                 hw_created INTEGER NOT NULL DEFAULT 0,
+                ai_answers INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (tutor_id, day)
             )
             """
         )
+        # миграция: в ранних версиях таблицы не было колонки ai_answers
+        cur = await conn.execute("PRAGMA table_info(usage_counters)")
+        cols = {r[1] for r in await cur.fetchall()}
+        if "ai_answers" not in cols:
+            await conn.execute(
+                "ALTER TABLE usage_counters ADD COLUMN ai_answers INTEGER NOT NULL DEFAULT 0"
+            )
         await conn.commit()
     finally:
         await conn.close()
@@ -268,25 +278,30 @@ def _month_prefix() -> str:
 
 async def _get_usage_row(conn: aiosqlite.Connection, tutor_id: int) -> tuple:
     cur = await conn.execute(
-        "SELECT mails_sent, hw_created FROM usage_counters WHERE tutor_id=? AND day=?",
+        "SELECT mails_sent, hw_created, ai_answers FROM usage_counters"
+        " WHERE tutor_id=? AND day=?",
         (tutor_id, _today()),
     )
     row = await cur.fetchone()
-    return row if row else (0, 0)
+    return row if row else (0, 0, 0)
 
 
 async def get_usage(tutor_id: int) -> dict:
-    """Сколько сегодня отправлено рассылок и создано ДЗ в этом месяце."""
+    """Сколько сегодня отправлено рассылок, ответов ИИ и создано ДЗ за месяц."""
     conn = await _connect()
     try:
-        mails_today, _ = await _get_usage_row(conn, tutor_id)
+        mails_today, _, ai_today = await _get_usage_row(conn, tutor_id)
         cur = await conn.execute(
             """SELECT COALESCE(SUM(hw_created), 0) FROM usage_counters
                WHERE tutor_id=? AND day LIKE ?""",
             (tutor_id, _month_prefix() + "%"),
         )
         hw_month = (await cur.fetchone())[0]
-        return {"mails_today": mails_today, "hw_month": hw_month}
+        return {
+            "mails_today": mails_today,
+            "hw_month": hw_month,
+            "ai_today": ai_today,
+        }
     finally:
         await conn.close()
 
@@ -343,6 +358,33 @@ async def consume_homework(tutor_id: int) -> None:
             VALUES (?, ?, 0, 1)
             ON CONFLICT(tutor_id, day) DO UPDATE SET
                 hw_created = hw_created + 1
+            """,
+            (tutor_id, _today()),
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def ai_answers_left_today(tutor_id: int) -> int | None:
+    """None — безлимит; иначе сколько ответов ИИ ещё осталось сегодня."""
+    sub = await get_subscription(tutor_id)
+    limit = sub.effective_info.max_ai_answers_per_day
+    if limit is None:
+        return None
+    usage = await get_usage(tutor_id)
+    return max(0, limit - usage["ai_today"])
+
+
+async def consume_ai_answer(tutor_id: int) -> None:
+    conn = await _connect()
+    try:
+        await conn.execute(
+            """
+            INSERT INTO usage_counters (tutor_id, day, mails_sent, hw_created, ai_answers)
+            VALUES (?, ?, 0, 0, 1)
+            ON CONFLICT(tutor_id, day) DO UPDATE SET
+                ai_answers = ai_answers + 1
             """,
             (tutor_id, _today()),
         )

@@ -71,6 +71,16 @@ class Config:
     # 0 = отключить оплату звёздами.
     PRO_PRICE_STARS: int = int(os.getenv("PRO_PRICE_STARS", "800"))
 
+    # === ИИ-ассистент (OpenAI-совместимый API) ===
+    # Ключ от провайдера. Пусто — ассистент выключен для учеников.
+    # Примеры (.env):
+    #   DeepSeek:   AI_BASE_URL=https://api.deepseek.com/v1   AI_MODEL=deepseek-chat
+    #   OpenAI:     AI_BASE_URL=https://api.openai.com/v1     AI_MODEL=gpt-4o-mini
+    #   OpenRouter: AI_BASE_URL=https://openrouter.ai/api/v1  AI_MODEL=любая модель
+    AI_API_KEY: str = os.getenv("AI_API_KEY", "")
+    AI_BASE_URL: str = os.getenv("AI_BASE_URL", "https://api.deepseek.com/v1")
+    AI_MODEL: str = os.getenv("AI_MODEL", "deepseek-chat")
+
     # === БЕЗОПАСНОСТЬ: ключ шифрования ОБЯЗАТЕЛЬНО задавать в .env ===
     # Генерация: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     _raw_key = os.getenv("ENCRYPTION_KEY", "")

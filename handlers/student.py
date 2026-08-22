@@ -276,3 +276,100 @@ async def contact_tutor(message: Message):
     await message.answer(
         "✅ Репетитор получил уведомление. С вами свяжутся в ближайшее время!"
     )
+
+
+# =================== ИИ-АССИСТЕНТ (отвечает от лица репетитора) ===================
+class AIChat(StatesGroup):
+    chat = State()
+
+
+def _ai_exit_kb():
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⏹ Выйти из чата", callback_data="ai_exit")
+    return builder.as_markup()
+
+
+@router.message(F.text == "🤖 Спросить")
+async def ai_chat_start(message: Message, state: FSMContext):
+    from services import ai_assistant, subscription as sub_service
+
+    if not config.AI_API_KEY:
+        await message.answer(
+            "🤖 ИИ-ассистент пока не подключён.\n"
+            "Воспользуйтесь меню или кнопкой «📞 Связаться с репетитором»."
+        )
+        return
+    if not await ai_assistant.is_configured():
+        await message.answer(
+            "🤖 ИИ-ассистент сейчас отключён репетитором.\n"
+            "Задайте вопрос через «❓ FAQ» или «📞 Связаться с репетитором»."
+        )
+        return
+    await state.set_state(AIChat.chat)
+    await state.update_data(ai_history=[])
+    left = None
+    if config.ADMIN_IDS:
+        left = await sub_service.ai_answers_left_today(config.ADMIN_IDS[0])
+    limit_note = (
+        f"\n\n📦 На бесплатном тарифе осталось ответов на сегодня: {left}."
+        if left is not None else ""
+    )
+    await message.answer(
+        "🤖 <b>Чат с ассистентом репетитора</b>\n\n"
+        "Задайте любой вопрос об занятиях, ценах и формате — "
+        "отвечу от лица репетитора.\n"
+        "Кнопки меню по-прежнему работают; выход — кнопка ниже или /cancel."
+        + limit_note,
+        reply_markup=_ai_exit_kb(),
+    )
+
+
+@router.callback_query(F.data == "ai_exit")
+async def ai_chat_exit(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.answer("Чат закрыт")
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await callback.message.answer("⏹ Чат с ассистентом закрыт. Возвращайтесь!")
+
+
+@router.message(AIChat.chat)
+async def ai_chat_reply(message: Message, state: FSMContext):
+    """Вопрос ученика → ответ ИИ от лица репетитора. Последний хендлер роутера."""
+    from services import ai_assistant, subscription as sub_service
+    from utils.helpers import is_cancel
+
+    if is_cancel(message.text):
+        await state.clear()
+        await message.answer("⏹ Чат с ассистентом закрыт. Возвращайтесь!")
+        return
+
+    owner = config.ADMIN_IDS[0] if config.ADMIN_IDS else None
+    if owner is not None:
+        left = await sub_service.ai_answers_left_today(owner)
+        if left is not None and left <= 0:
+            await message.answer(
+                "😔 ИИ-ассистент сегодня уже отвечал на все вопросы бесплатного "
+                "тарифа.\n\nОстальные кнопки меню работают, а сложные вопросы "
+                "можно задать через «📞 Связаться с репетитором»."
+            )
+            return
+
+    data = await state.get_data()
+    history = data.get("ai_history", [])
+    await message.bot.send_chat_action(message.chat.id, "typing")
+    try:
+        answer = await ai_assistant.answer_question(message.text, history)
+    except ai_assistant.AiUnavailable as e:
+        await message.answer(f"⚠️ {e}")
+        return
+    # списокываем квоту и запоминаем контекст диалога
+    if owner is not None:
+        await sub_service.consume_ai_answer(owner)
+    history.append({"role": "user", "content": message.text})
+    history.append({"role": "assistant", "content": answer})
+    await state.update_data(ai_history=history[-6:])
+    await message.answer(answer)

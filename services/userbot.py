@@ -50,6 +50,9 @@ class UserbotService:
                 self.is_connected = True
                 me = await self.client.get_me()
                 logger.info(f"✅ Userbot подключен: {me.first_name} ({me.phone})")
+                # ИИ-автоответы в ЛС репетитора (вкл/выкл — в админке)
+                from services import ai_replies
+                ai_replies.attach(self.client)
                 return True
             else:
                 logger.info(
@@ -199,6 +202,8 @@ class UserbotService:
             self.is_connected = True
             me = await self.client.get_me()
             logger.info(f"✅ Userbot авторизован: {me.first_name} ({me.phone})")
+            from services import ai_replies
+            ai_replies.attach(self.client)
             return True, ""
         except SessionPasswordNeededError:
             logger.info("Userbot: у аккаунта включён двухступенчатый пароль")
@@ -231,6 +236,8 @@ class UserbotService:
             self.is_connected = True
             me = await self.client.get_me()
             logger.info(f"✅ Userbot авторизован (2FA): {me.first_name} ({me.phone})")
+            from services import ai_replies
+            ai_replies.attach(self.client)
             return True, ""
         except Exception as e:
             err = f"{type(e).__name__}: {e}"

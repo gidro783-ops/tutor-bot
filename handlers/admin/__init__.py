@@ -6,6 +6,7 @@
 """
 from aiogram import Router
 
+from .ai import router as ai_router
 from .core import check_admin, show_admin_panel
 from .core import router as core_router
 from .misc import router as misc_router
@@ -19,6 +20,7 @@ router.include_router(core_router)
 router.include_router(students_router)
 router.include_router(subjects_router)
 router.include_router(schedule_router)
+router.include_router(ai_router)
 router.include_router(misc_router)
 router.include_router(userbot_router)
 

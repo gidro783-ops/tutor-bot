@@ -104,12 +104,20 @@ class TestQuotas:
             run(sub.consume_homework(OWNER))
         assert run(sub.homework_left_this_month(OWNER)) == 0
 
+    def test_free_ai_10_per_day(self):
+        assert run(sub.ai_answers_left_today(OWNER)) == 10
+        for _ in range(10):
+            run(sub.consume_ai_answer(OWNER))
+        assert run(sub.ai_answers_left_today(OWNER)) == 0
+
     def test_pro_quotas_unlimited(self):
         run(sub.activate(OWNER, sub.Plan.PRO, months=1))
         run(sub.consume_mailing(OWNER, 100))
         run(sub.consume_homework(OWNER))
+        run(sub.consume_ai_answer(OWNER))
         assert run(sub.mailing_left_today(OWNER)) is None
         assert run(sub.homework_left_this_month(OWNER)) is None
+        assert run(sub.ai_answers_left_today(OWNER)) is None
         assert run(sub.can_send_mailing(OWNER, 10000))
 
 
