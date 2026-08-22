@@ -6,8 +6,8 @@ on:
   pull_request:
 
 jobs:
-  smoke-test:
-    name: Smoke tests (логика БД и напоминаний)
+  tests:
+    name: Pytest + smoke (логика БД, безопасность, напоминания)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,17 +16,15 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Смоук-тест подменяет внешние зависимости шимами,
-      # поэтому pip install не нужен — прогон занимает секунды.
-      - name: Run smoke test
-        run: python tests/smoke_test.py
+      # Pytest гоняет реальную логику на SQLite — нужны зависимости.
+      # Смоук-тест шимами не пользуется и работает в той же среде.
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest tests/ -q
+      - run: python tests/smoke_test.py
 
   lint:
     name: Ruff
     runs-on: ubuntu-latest
-    # «Мягкий» режим: отчёт есть, но сборка не падает.
-    # Добейтесь зелёного прогона — и уберите эту строку.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 

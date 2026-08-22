@@ -43,7 +43,7 @@ python -c "from utils.security import hash_password; print(hash_password('ВАШ
 ## 🧪 Тесты и качество
 
 ```bash
-make test    # смоук-тест: 23 проверки бизнес-логики (без запуска бота)
+make test    # pytest (БД, безопасность, логика) + смоук-тест без запуска бота
 make lint    # ruff
 ```
 
@@ -64,13 +64,14 @@ CI (GitHub Actions) прогоняет оба шага на каждый push �
 main.py                  # точка входа: polling + healthcheck-сервер + планировщик
 config.py                # конфигурация из .env (с валидацией обязательных секретов)
 database.py              # SQLite: схема, авто-миграции, бизнес-логика
-handlers/                # роутеры: admin, student, booking, homework, payments, …
+handlers/                # роутеры: admin/, student, booking, homework, payments, …
+handlers/admin/          # админ-панель по разделам: core, students, subjects,
+                         # schedule, userbot, misc
 keyboards/               # инлайн/reply-клавиатуры
 middlewares/             # DND, активность пользователя
 services/                # scheduler, notification, backup, userbot, analytics
 utils/                   # helpers, texts, security (хэши паролей)
-tests/smoke_test.py      # 23 проверки логики без внешних зависимостей
-scripts/legacy/          # исторические скрипты-заплатки (не используются)
+tests/                   # pytest (БД, безопасность, логика) + smoke_test.py
 docs/CLEANUP.md          # как вычистить историю git от бинарного мусора
 ```
 
@@ -110,4 +111,4 @@ git push heroku main
 - [ ] Миграция SQLite → PostgreSQL для multi-worker деплоя
 - [ ] Ruff в строгом режиме (убрать `continue-on-error` в CI)
 
-История исправлений вынесена в `CHANGELOG.md` и `README-FIXES.md`.
+История исправлений — в `CHANGELOG.md`.

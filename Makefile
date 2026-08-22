@@ -9,7 +9,8 @@ install: ## Установить зависимости
 dev: ## Зависимости + инструменты разработки (ruff, pytest)
 	pip install -r requirements-dev.txt
 
-test: ## Смоук-тест логики (23 проверки, без запуска бота)
+test: ## Pytest (БД, безопасность, логика) + смоук-тест
+	python -m pytest tests/ -q
 	python tests/smoke_test.py
 
 lint: ## Проверка кода (ruff)
