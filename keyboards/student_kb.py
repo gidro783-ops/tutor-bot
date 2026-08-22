@@ -102,6 +102,7 @@ def booking_detail_keyboard(booking_id: int,
                             can_cancel: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if can_cancel:
+        builder.button(text="🔄 Перенести", callback_data=f"mybooking:reschedule:{booking_id}")
         builder.button(text="❌ Отменить", callback_data=f"mybooking:cancel:{booking_id}")
     builder.button(text="◀️ Назад", callback_data="mybookings:list")
     builder.adjust(1)

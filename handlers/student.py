@@ -11,6 +11,8 @@ from database import db
 from keyboards.student_kb import student_main_menu, faq_keyboard
 from utils.texts import Texts
 from utils.helpers import generate_referral_code, escape_html
+import asyncio
+from keyboards.subscription_kb import cancel_flow_kb
 from config import config
 from utils.fsm_guard import FsmGuard
 
@@ -376,6 +378,111 @@ async def ai_chat_reply(message: Message, state: FSMContext):
     await message.answer(answer)
 
 
+# =================== ПОИСК МАТЕРИАЛОВ В ИНТЕРНЕТЕ ===================
+class SearchStates(StatesGroup):
+    query = State()
+    results = State()
+
+
+@router.callback_query(F.data == "ksearch:start")
+async def ksearch_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(SearchStates.query)
+    await callback.message.edit_text(
+        "🔎 <b>Поиск материалов</b>\n\n"
+        "Напишите название книги, статьи или темы. Ищем в открытых базах:\n"
+        "• arXiv — научные статьи (PDF пришлю файлом)\n"
+        "• Open Library — книги (карточка + ссылка)",
+        reply_markup=cancel_flow_kb(),
+    )
+
+
+@router.message(SearchStates.query)
+async def ksearch_run(message: Message, state: FSMContext):
+    from services.cleanup import say
+    from services import knowledge_search as ks
+    from utils.helpers import is_cancel
+
+    if is_cancel(message.text):
+        await state.clear()
+        await say(message, "❌ Поиск отменён.")
+        return
+    query = (message.text or "").strip()[:200]
+    if len(query) < 2:
+        await say(message, "❌ Введите минимум 2 символа:")
+        return
+    await message.bot.send_chat_action(message.chat.id, "typing")
+    articles, books = await asyncio.gather(
+        ks.search_articles(query), ks.search_books(query)
+    )
+    if not articles and not books:
+        await state.clear()
+        await say(message, "📭 Ничего не нашлось. Попробуйте точнее — автор или название.")
+        return
+    # сохраняем результаты и показываем кнопками
+    results = ([{"kind": "a", **a} for a in articles]
+               + [{"kind": "b", **b} for b in books])[:8]
+    await state.update_data(kresults=results)
+    await state.set_state(SearchStates.results)
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    for i, r in enumerate(results):
+        icon = "📄" if r["kind"] == "a" else "📕"
+        label = f"{icon} {r['title'][:50]}"
+        if r.get("year") and r["year"] != "—":
+            label += f" ({r['year']})"
+        builder.button(text=label, callback_data=f"kget:{i}")
+    builder.button(text="◀️ В меню материалов", callback_data="ksearch:exit")
+    builder.adjust(1)
+    await message.answer(
+        f"🔎 Нашёл {len(results)} материалов по «{escape_html(query)}»:",
+        reply_markup=builder.as_markup(),
+    )
+
+
+@router.callback_query(F.data == "ksearch:exit")
+async def ksearch_exit(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await my_materials(callback.message)
+
+
+@router.callback_query(F.data.startswith("kget:"))
+async def ksearch_get(callback: CallbackQuery, state: FSMContext):
+    from services import knowledge_search as ks
+    from aiogram.types import BufferedInputFile
+
+    data = await state.get_data()
+    results = data.get("kresults") or []
+    idx = int(callback.data.split(":")[-1])
+    if idx >= len(results):
+        await callback.answer("Результаты устарели, поиск заново", show_alert=True)
+        return
+    r = results[idx]
+    await callback.answer()
+    msg = await callback.message.answer("⏳ Загружаю…")
+    if r["kind"] == "a":
+        pdf = await ks.download_pdf(r["pdf_url"])
+        if pdf:
+            await msg.delete()
+            await callback.message.answer_document(
+                BufferedInputFile(pdf, filename=f"{r['title'][:60]}.pdf"),
+                caption=f"📄 {escape_html(r['title'])}\n"
+                        f"✍️ {escape_html(r['authors'])} · {r['year']}",
+            )
+        else:
+            await msg.edit_text(
+                f"⚠️ PDF не скачался (слишком большой или недоступен), "
+                f"вот ссылка:\n{r['pdf_url']}"
+            )
+    else:
+        full = ("\n✅ Полный текст доступен бесплатно" if r.get("has_fulltext") else "")
+        await msg.edit_text(
+            f"📕 <b>{escape_html(r['title'])}</b>\n"
+            f"✍️ {escape_html(r['authors'])} · {r['year']}{full}\n\n"
+            f"🔗 {r['link']}\n\n"
+            f"Открыть можно бесплатно на Open Library."
+        )
+
+
 # =================== МАТЕРИАЛЫ ===================
 @router.message(F.text == "📂 Материалы")
 async def my_materials(message: Message):
@@ -387,6 +494,7 @@ async def my_materials(message: Message):
         await say(message, "📂 Материалов пока нет. Репетитор загрузит — появятся здесь.")
         return
     builder = InlineKeyboardBuilder()
+    builder.button(text="🔎 Найти в интернете (книги, статьи, PDF)", callback_data="ksearch:start")
     for m in items[:25]:
         subj = f" · {m['subject_name']}" if m.get("subject_name") else ""
         builder.button(

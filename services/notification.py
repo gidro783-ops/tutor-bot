@@ -233,10 +233,16 @@ async def auto_complete_bookings(bot: Bot):
                 continue  # ещё идёт
             await db.complete_booking(b["id"])
             if b.get("student_user_id"):
+                # списываем занятие с абонемента, если он активен
+                left = await db.consume_lesson(b["student_user_id"])
+                balance_note = (
+                    f"\n🎟 Осталось занятий по абонементу: {left}"
+                    if left is not None else ""
+                )
                 await bot.send_message(
                     b["student_user_id"],
                     "📚 Занятие закончено — как всё прошло?\n"
-                    "Оцени, пожалуйста (это займёт 2 секунды):",
+                    "Оцени, пожалуйста (это займёт 2 секунды):" + balance_note,
                     reply_markup=rating_keyboard(),
                 )
         except Exception as e:

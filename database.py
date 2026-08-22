@@ -36,6 +36,7 @@ class Database:
                 "source_chat_id": "INTEGER", "referrer_id": "INTEGER",
                 "is_active": "INTEGER NOT NULL DEFAULT 1", "last_activity": "TEXT",
                 "total_lessons": "INTEGER DEFAULT 0", "notes": "TEXT DEFAULT ''",
+                "lessons_balance": "INTEGER NOT NULL DEFAULT 0",
             },
             "admin_sessions": {
                 "auth_time": "TEXT", "session_expires": "TEXT",
@@ -1534,6 +1535,39 @@ class Database:
             await self.db.commit()
         except Exception as e:
             logger.error(f"[increment_ab_stat] Failed: {e}")
+
+    # =================== АБОНЕМЕНТЫ (пакеты занятий) ===================
+    async def add_lessons(self, user_id: int, count: int) -> int:
+        """Пополнить баланс занятий по абонементу. Возвращает новый баланс."""
+        try:
+            cursor = await self.db.execute(
+                "UPDATE students SET lessons_balance = lessons_balance + ?"
+                " WHERE user_id = ?",
+                (count, user_id)
+            )
+            await self.db.commit()
+            student = await self.get_student(user_id)
+            return int((student or {}).get("lessons_balance") or 0)
+        except Exception as e:
+            logger.error(f"[add_lessons] Failed: {e}")
+            return 0
+
+    async def consume_lesson(self, user_id: int) -> int | None:
+        """Списать одно занятие с абонемента. None = баланса не было."""
+        student = await self.get_student(user_id)
+        if not student or int(student.get("lessons_balance") or 0) <= 0:
+            return None
+        try:
+            await self.db.execute(
+                "UPDATE students SET lessons_balance = lessons_balance - 1"
+                " WHERE user_id = ? AND lessons_balance > 0",
+                (user_id,)
+            )
+            await self.db.commit()
+            return int(student["lessons_balance"]) - 1
+        except Exception as e:
+            logger.error(f"[consume_lesson] Failed: {e}")
+            return None
 
     # =================== ШАБЛОНЫ БЫСТРЫХ ОТВЕТОВ ===================
     async def add_template(self, title: str, text: str) -> int:

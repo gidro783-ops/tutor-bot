@@ -1,5 +1,6 @@
 aiogram>=3.4.1
 aiohttp>=3.9.0
+certifi
 aiosqlite>=0.19.0
 cryptography>=42.0.0
 bcrypt>=4.1.0

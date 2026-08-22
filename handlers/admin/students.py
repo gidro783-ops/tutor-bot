@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """Админка: раздел «Ученики»."""
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
 
 from database import db
 from keyboards.admin_kb import (
@@ -10,11 +12,16 @@ from keyboards.admin_kb import (
     student_detail_keyboard,
     student_list_keyboard,
 )
+from keyboards.subscription_kb import cancel_flow_kb
 from utils.helpers import escape_html
 
 from .core import check_admin
 
 router = Router()
+
+
+class PackageStates(StatesGroup):
+    count = State()
 
 # =================== УЧЕНИКИ ===================
 @router.callback_query(F.data == "admin:students")
@@ -57,6 +64,8 @@ async def admin_students_page(callback: CallbackQuery):
     & ~F.data.contains(":payments")
     & ~F.data.contains(":message")
     & ~F.data.contains(":deactivate")
+    & ~F.data.contains(":report:")
+    & ~F.data.contains(":package:")
 )
 async def admin_student_detail(callback: CallbackQuery):
     if not await check_admin(callback):
@@ -77,6 +86,7 @@ async def admin_student_detail(callback: CallbackQuery):
         f"📊 Занятий: {student.get('total_lessons', 0)}\n"
         f"📌 Источник: {student.get('source', '—')}\n"
         f"📋 Записей: {len(bookings)}\n"
+        f"🎟 Абонемент: {student.get('lessons_balance', 0)} занятий\n"
         f"💳 Долг: {len(pending_payments)}\n"
         f"📝 {escape_html(student.get('notes', '—'))}"
     )
@@ -148,3 +158,84 @@ async def student_report(callback: CallbackQuery):
         BufferedInputFile(content, filename=f"student_{student_id}.txt"),
         caption=f"📄 Отчёт: {escape_html(student['full_name'])}",
     )
+
+
+# =================== АБОНЕМЕНТЫ (пакеты занятий) ===================
+@router.callback_query(F.data.startswith("admin:student:package:"))
+async def sell_package(callback: CallbackQuery, state: FSMContext):
+    """Продать абонемент: количество занятий и цена."""
+    if not await check_admin(callback):
+        return
+    student_id = int(callback.data.split(":")[-1])
+    student = await db.get_student(student_id)
+    if not student:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+    await state.update_data(student_id=student_id)
+    await state.set_state(PackageStates.count)
+    balance = int(student.get("lessons_balance") or 0)
+    await callback.message.edit_text(
+        f"🎟 <b>Абонемент для {escape_html(student['full_name'])}</b>\n"
+        f"Остаток сейчас: {balance}\n\n"
+        f"Введите: <code>количество;цена</code>\n"
+        f"Например: <code>8;7200</code> (8 занятий за 7200 ₽)",
+        reply_markup=cancel_flow_kb(),
+    )
+
+
+@router.message(PackageStates.count)
+async def save_package(message: Message, state: FSMContext):
+    from services.cleanup import say
+    from utils.helpers import is_cancel, validate_amount
+
+    if is_cancel(message.text):
+        await state.clear()
+        await say(message, "❌ Продажа абонемента отменена.")
+        return
+    raw = (message.text or "").replace(" ", "")
+    try:
+        count_str, _, price_str = raw.partition(";")
+        count = int(count_str)
+        price = validate_amount(price_str)
+        assert 1 <= count <= 100
+    except Exception:
+        await say(message, "❌ Формат: количество;цена (например 8;7200):")
+        return
+    data = await state.get_data()
+    await state.clear()
+    student = await db.get_student(data["student_id"])
+    if not student:
+        await say(message, "❌ Ученик не найден.")
+        return
+    new_balance = await db.add_lessons(student["user_id"], count)
+    await db.create_payment(
+        student["user_id"], price,
+        f"Абонемент: {count} занятий",
+    )
+    # счёт абонемента закрываем сразу как оплаченный (продажа вручную)
+    try:
+        cursor = await db.db.execute(
+            "SELECT id FROM payments WHERE student_id = ? AND description = ?"
+            " ORDER BY id DESC LIMIT 1",
+            (student["user_id"], f"Абонемент: {count} занятий"),
+        )
+        row = await cursor.fetchone()
+        if row:
+            await db.confirm_payment(row["id"], method="package")
+    except Exception:
+        pass
+    await say(
+        message,
+        f"🎟 Абонемент продан: +{count} занятий ({price:.0f} ₽).\n"
+        f"Остаток {escape_html(student['full_name'])}: {new_balance}.",
+    )
+    try:
+        await message.bot.send_message(
+            student["user_id"],
+            f"🎟 <b>Абонемент активирован!</b>\n\n"
+            f"Занятий на балансе: {new_balance}\n"
+            f"Оплачено: {price:.0f} ₽\n\n"
+            f"Приходите на занятие — баланс уменьшится сам.",
+        )
+    except Exception:
+        pass

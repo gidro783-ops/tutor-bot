@@ -383,6 +383,72 @@ async def my_booking(cb: CallbackQuery):
         await db.cancel_booking(int(parts[2]), reason="Отменено учеником")
         await cb.message.edit_text("❌ Занятие отменено.")
         return
+    if parts[1] == "reschedule":
+        # ===== ПЕРЕНОС ЗАНЯТИЯ УЧЕНИКОМ: выбор нового слота =====
+        bk = await db.get_booking(int(parts[2]))
+        if not bk or bk["student_id"] != cb.from_user.id:
+            await cb.answer("Не найдено", show_alert=True)
+            return
+        if bk["status"] not in ("pending", "confirmed"):
+            await cb.answer("Это занятие уже нельзя перенести", show_alert=True)
+            return
+        from utils.helpers import format_date
+        slots = await db.get_available_slots()
+        if not slots:
+            await cb.answer("Свободных слотов пока нет — попробуйте позже", show_alert=True)
+            return
+        builder = InlineKeyboardBuilder()
+        for s in slots[:15]:
+            builder.button(
+                text=f"📅 {format_date(s['date'])} {s['start_time'][:5]}",
+                callback_data=f"mybooking:move:{bk['id']}:{s['id']}",
+            )
+        builder.button(text="◀️ Назад к занятию", callback_data=f"mybooking:{bk['id']}")
+        builder.adjust(1)
+        await cb.message.edit_text(
+            "🔄 <b>Перенос занятия</b>\nВыберите новое время:",
+            reply_markup=builder.as_markup(),
+        )
+        return
+    if parts[1] == "move":
+        booking_id, slot_id = int(parts[2]), int(parts[3])
+        bk = await db.get_booking(booking_id)
+        if not bk or bk["student_id"] != cb.from_user.id:
+            await cb.answer("Не найдено", show_alert=True)
+            return
+        if bk["status"] not in ("pending", "confirmed"):
+            await cb.answer("Это занятие уже нельзя перенести", show_alert=True)
+            return
+        slot = await db.get_slot(slot_id)
+        if not slot or not slot.get("is_available"):
+            await cb.answer("Слот уже занят, выберите другой", show_alert=True)
+            return
+        # сначала создаём новую запись (займёт слот), потом отменяем старую
+        new_id = await db.create_booking(
+            cb.from_user.id, slot_id, bk.get("subject_id"),
+            bk.get("booking_type") or "regular",
+        )
+        if not new_id:
+            await cb.answer("Не удалось перенести, попробуйте ещё раз", show_alert=True)
+            return
+        old_date, old_time = str(bk.get("date", ""))[:10], str(bk.get("start_time", ""))[:5]
+        await db.cancel_booking(booking_id, reason="Перенесено учеником")
+        from utils.helpers import format_date
+        await cb.message.edit_text(
+            "✅ <b>Занятие перенесено!</b>\n\n"
+            f"Было: {old_date} {old_time}\n"
+            f"Стало: {format_date(slot['date'])} {slot['start_time'][:5]}"
+        )
+        for admin_id in config.ADMIN_IDS:
+            try:
+                await cb.bot.send_message(
+                    admin_id,
+                    f"🔄 Ученик {escape_html(cb.from_user.full_name)} перенёс занятие:\n"
+                    f"{old_date} {old_time} → {slot['date']} {slot['start_time'][:5]}",
+                )
+            except Exception:
+                pass
+        return
     bk = await db.get_booking(int(parts[1]))
     if not bk or bk["student_id"] != cb.from_user.id:
         await cb.answer("Не найдено", show_alert=True)

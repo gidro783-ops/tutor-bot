@@ -203,7 +203,9 @@ def student_detail_keyboard(student_id: int) -> InlineKeyboardMarkup:
         ("📅 Записи", f"admin:student:{student_id}:bookings"),
         ("📝 ДЗ", f"admin:student:{student_id}:hw"),
         ("💳 Оплаты", f"admin:student:{student_id}:payments"),
+        ("🎟 Абонемент", f"admin:student:package:{student_id}"),
         ("✉️ Написать", f"admin:student:{student_id}:message"),
+        ("📄 Отчёт", f"admin:student:report:{student_id}"),
         ("🚫 Деактивировать", f"admin:student:{student_id}:deactivate"),
         ("◀️ Назад", "admin:students:list"),
     ]

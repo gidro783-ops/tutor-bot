@@ -206,3 +206,15 @@ class TestNewFeatures:
         assert any(m["id"] == mid and m["file_id"] == "file_id_123" for m in items)
         run(db.delete_material(mid))
         assert not run(db.get_materials())
+
+
+class TestLessonsBalance:
+    def test_add_and_consume(self, db):
+        run(db.add_student(100, "Иван"))
+        assert run(db.consume_lesson(100)) is None      # без абонемента
+        balance = run(db.add_lessons(100, 8))
+        assert balance == 8
+        assert run(db.consume_lesson(100)) == 7
+        assert run(db.consume_lesson(100)) == 6
+        student = run(db.get_student(100))
+        assert student["lessons_balance"] == 6
