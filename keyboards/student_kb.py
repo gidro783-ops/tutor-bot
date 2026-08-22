@@ -9,6 +9,7 @@ def student_main_menu() -> ReplyKeyboardMarkup:
         "📋 Мои занятия",
         "🤖 Спросить ИИ",
         "📝 Домашние задания",
+        "📂 Материалы",
         "💳 Оплата",
         "❓ FAQ",
         "👤 Профиль",
@@ -17,7 +18,7 @@ def student_main_menu() -> ReplyKeyboardMarkup:
     ]
     for btn in buttons:
         builder.button(text=btn)
-    builder.adjust(2, 2, 2, 2, 1)  # широкая кнопка связи — отдельно
+    builder.adjust(2, 2, 2, 2, 2)  # ровные пары
     return builder.as_markup(resize_keyboard=True)
 
 

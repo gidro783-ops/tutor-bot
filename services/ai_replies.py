@@ -162,6 +162,12 @@ async def _on_incoming(event):
         dm_enabled = await db.get_setting(DM_ENABLED_KEY, "0") == "1"
         if not dm_enabled:
             return
+        # Тихие часы: ночью ИИ в ЛС молчит (AI_DND_START/END в .env)
+        if config.AI_DND_START != config.AI_DND_END:
+            from utils.helpers import is_dnd_active
+            if is_dnd_active(config.AI_DND_START, config.AI_DND_END,
+                             config.TIMEZONE):
+                return
         from services import ai_assistant, subscription as sub_service
 
         if not config.AI_API_KEY or not await ai_assistant.is_configured():

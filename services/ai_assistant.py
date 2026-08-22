@@ -23,6 +23,7 @@ KB_NAME = "ai_tutor_name"
 KB_SUBJECTS = "ai_subjects"
 KB_ABOUT = "ai_about"
 KB_STYLE = "ai_style"
+KB_PROMPT = "ai_prompt"   # полный свой промпт — перекрывает стандартный
 KB_ENABLED = "ai_enabled"
 
 SYSTEM_TEMPLATE = """Ты — репетитор{tutor_name_part}, который переписывается в Telegram.
@@ -56,6 +57,26 @@ def build_system_prompt(settings: dict, faq: list[dict]) -> str:
     subjects = (settings.get(KB_SUBJECTS) or "").strip()
     about = (settings.get(KB_ABOUT) or "").strip()
     style = (settings.get(KB_STYLE) or "").strip()
+    custom_prompt = (settings.get(KB_PROMPT) or "").strip()
+    if custom_prompt:
+        # Свой промпт полностью заменяет стандартные правила; анкета
+        # прикладывается отдельным блоком, чтобы ИИ не выдумывал факты
+        knowledge_blocks = []
+        if subjects:
+            knowledge_blocks.append(f"Предметы и цены:\n{subjects}")
+        if about:
+            knowledge_blocks.append(f"Опыт, формат занятий, условия:\n{about}")
+        if faq:
+            knowledge_blocks.append("Частые вопросы (FAQ):\n" + "\n".join(
+                f"Вопрос: {str(f.get('question', '')[:200])}\n"
+                f"Ответ: {str(f.get('answer', '')[:500])}"
+                for f in faq[:20]
+            ))
+        knowledge = ("\n\n".join(knowledge_blocks)
+                     or "(Анкета не заполнена.)")
+        return (custom_prompt
+                + "\n\nПроверенные факты о репетиторе (используй только их"
+                  " для цен, расписания и условий):\n" + knowledge)
 
     tutor_name_part = f" {name}" if name else ""
     blocks = []
@@ -97,6 +118,7 @@ async def answer_question(question: str, history: list | None = None) -> str:
         KB_SUBJECTS: await db.get_setting(KB_SUBJECTS, ""),
         KB_ABOUT: await db.get_setting(KB_ABOUT, ""),
         KB_STYLE: await db.get_setting(KB_STYLE, ""),
+        KB_PROMPT: await db.get_setting(KB_PROMPT, ""),
     }
     try:
         faq = await db.get_all_faq()

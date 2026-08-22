@@ -6,10 +6,14 @@ from apscheduler.triggers.interval import IntervalTrigger
 from aiogram import Bot
 
 from services.notification import (
+    auto_complete_bookings,
     send_booking_reminders,
     send_homework_deadline_reminders,
     send_morning_summary,
     send_payment_reminders,
+    send_scheduled_messages,
+    send_tomorrow_summary,
+    send_weekly_summary,
 )
 from services.backup import send_db_backup
 from database import db
@@ -55,6 +59,38 @@ class BotScheduler:
             trigger=CronTrigger(hour=config.HW_REMINDER_HOUR, minute=30),
             args=[self.bot],
             id="hw_deadline_reminders",
+            replace_existing=True,
+        )
+        # Отложенные сообщения — проверяем каждые 30 секунд
+        self.scheduler.add_job(
+            send_scheduled_messages,
+            trigger=IntervalTrigger(seconds=30),
+            args=[self.bot],
+            id="scheduled_messages",
+            replace_existing=True,
+        )
+        # Авто-завершение прошедших занятий + запрос отзыва
+        self.scheduler.add_job(
+            auto_complete_bookings,
+            trigger=IntervalTrigger(minutes=5),
+            args=[self.bot],
+            id="auto_complete_bookings",
+            replace_existing=True,
+        )
+        # «Завтрашние занятия» репетитору — каждый вечер в 20:00
+        self.scheduler.add_job(
+            send_tomorrow_summary,
+            trigger=CronTrigger(hour=20, minute=0),
+            args=[self.bot],
+            id="tomorrow_summary",
+            replace_existing=True,
+        )
+        # Итоги недели — по понедельникам в 9:00
+        self.scheduler.add_job(
+            send_weekly_summary,
+            trigger=CronTrigger(day_of_week="mon", hour=9, minute=0),
+            args=[self.bot],
+            id="weekly_summary",
             replace_existing=True,
         )
         # Генерация повторяющихся слотов ежедневно в 00:05

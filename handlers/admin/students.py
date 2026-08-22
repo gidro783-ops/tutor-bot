@@ -84,3 +84,67 @@ async def admin_student_detail(callback: CallbackQuery):
         text,
         reply_markup=student_detail_keyboard(student_id),
     )
+
+
+# =================== ОТЧЁТ ПО УЧЕНИКУ (файлом) ===================
+@router.callback_query(F.data.startswith("admin:student:report:"))
+async def student_report(callback: CallbackQuery):
+    """Полная карточка ученика одним текстовым файлом."""
+    if not await check_admin(callback):
+        return
+    from aiogram.types import BufferedInputFile
+
+    student_id = int(callback.data.split(":")[-1])
+    student = await db.get_student(student_id)
+    if not student:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+    bookings = await db.get_student_bookings(student_id)
+    homework = await db.get_student_homework(student_id)
+    payments = await db.get_pending_payments(student_id)
+
+    completed = [b for b in bookings if b["status"] == "completed"]
+    paid_total = 0
+    try:
+        cursor = await db.db.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS s FROM payments"
+            " WHERE student_id = ? AND status = 'paid'",
+            (student_id,)
+        )
+        paid_total = (await cursor.fetchone())["s"]
+    except Exception:
+        pass
+
+    lines = [
+        f"ОТЧЁТ ПО УЧЕНИКУ: {student['full_name']}",
+        f"Telegram ID: {student['user_id']}",
+        f"Телефон: {student.get('phone') or '—'}",
+        f"Источник: {student.get('source') or '—'}",
+        f"Зарегистрирован: {str(student.get('registration_date', ''))[:19]}",
+        "",
+        f"Занятий всего: {len(bookings)} (проведено: {len(completed)})",
+        "",
+        "=== БУДУЩИЕ И ПРОШЛЫЕ ЗАНЯТИЯ ===",
+    ]
+    for b in bookings[:30]:
+        lines.append(
+            f"{str(b.get('date', ''))[:10]} {str(b.get('start_time', ''))[:5]}"
+            f" — {b.get('status')} {b.get('subject_name') or ''}"
+        )
+    lines += ["", "=== ДОМАШНИЕ ЗАДАНИЯ ==="]
+    for h in homework[:30]:
+        lines.append(
+            f"#{h['id']} {str(h.get('title'))[:50]} — {h.get('status')}"
+            f" (оценка: {h.get('grade') or '—'})"
+        )
+    lines += ["", f"=== ОПЛАТА ===", f"Всего оплачено: {paid_total:.0f} ₽",
+              f"Неоплаченных счетов: {len(payments)}"]
+    for pay in payments:
+        lines.append(f"  #{pay['id']} {pay['amount']:.0f} ₽ — {pay.get('description', '')}")
+
+    content = "\n".join(lines).encode("utf-8")
+    await callback.answer()
+    await callback.message.answer_document(
+        BufferedInputFile(content, filename=f"student_{student_id}.txt"),
+        caption=f"📄 Отчёт: {escape_html(student['full_name'])}",
+    )

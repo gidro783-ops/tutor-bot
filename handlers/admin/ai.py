@@ -48,6 +48,17 @@ FIELDS = {
         "Пример: 8 лет опыта, онлайн в Zoom, пробное занятие бесплатно, "
         "отмена не позднее чем за 12 часов.",
     ),
+    "admin:ai:prompt": (
+        ai_assistant.KB_PROMPT,
+        "🧠 <b>Свой промпт для ИИ</b> — полная инструкция своими словами.\n"
+        "Заменяет стандартные правила (стиль, тон, поведение).\n"
+        "Пример: «Ты — Мария. Отвечай коротко, на ты. Про цены — только "
+        "по списку. Если просят скидку — предлагай 5% при оплате за 8 "
+        "занятий.»\n\n"
+        "Анкета (предметы/цены/FAQ) прикрепляется автоматически — цены "
+        "не выдумываются.\n\n"
+        "Введи «-» — вернётся стандартный промпт.",
+    ),
     "admin:ai:style": (
         ai_assistant.KB_STYLE,
         "💬 Опишите, КАК ИИ должен общаться (это главнее остальных правил).\n"
@@ -64,6 +75,7 @@ def _ai_menu_kb(enabled: bool, dm_enabled: bool) -> InlineKeyboardBuilder:
     builder.button(text="📚 Предметы и цены", callback_data="admin:ai:subjects")
     builder.button(text="📋 Опыт и формат", callback_data="admin:ai:about")
     builder.button(text="💬 Стиль общения", callback_data="admin:ai:style")
+    builder.button(text="🧠 Свой промпт", callback_data="admin:ai:prompt")
     builder.button(
         text=("🔁 Включить ассистента" if not enabled else "⏸ Выключить ассистента"),
         callback_data="admin:ai:toggle",
@@ -103,6 +115,7 @@ async def _show_ai_settings(target):
     subjects = await db.get_setting(ai_assistant.KB_SUBJECTS, "")
     about = await db.get_setting(ai_assistant.KB_ABOUT, "")
     style = await db.get_setting(ai_assistant.KB_STYLE, "")
+    prompt = await db.get_setting(ai_assistant.KB_PROMPT, "")
     skip_count = len(await ai_replies.get_skip_list())
 
     status = "🟢 включён" if enabled and key_ok else "🔴 выключен"
@@ -137,7 +150,8 @@ async def _show_ai_settings(target):
         f"👤 Имя: {name or '— не заполнено'}\n"
         f"📚 Предметы: {'✅ заполнено' if subjects else '— не заполнено'}\n"
         f"📋 Опыт: {'✅ заполнено' if about else '— не заполнено'}\n"
-        f"💬 Стиль: {'✅ задан' if style else '— по умолчанию (живой человек, без смайлов)'}\n\n"
+        f"💬 Стиль: {'✅ задан' if style else '— по умолчанию (живой человек, без смайлов)'}\n"
+        f"🧠 Свой промпт: {'✅ задан (главнее стиля)' if prompt else '— стандартный'}\n\n"
         f"ИИ отвечает только по этой анкете и вашему FAQ — ничего не "
         f"выдумывает. В ЛС отвечает всем, кроме списка исключений; если "
         f"вы ответили человеку сами — ИИ молчит у него 24 часа.{dm_hint}"
@@ -192,7 +206,7 @@ async def ai_save_field(message: Message, state: FSMContext):
     if not value or len(value) > 3000:
         await say(message, "❌ Текст от 1 до 3000 символов. Попробуйте ещё раз:")
         return
-    if key == ai_assistant.KB_STYLE and value == "-":
+    if key in (ai_assistant.KB_STYLE, ai_assistant.KB_PROMPT) and value == "-":
         value = ""  # «-» в стиле = вернуть стиль по умолчанию
     await db.set_setting(key, value)
     # первая заполненная анкета автоматически включает ассистента

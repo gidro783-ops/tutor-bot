@@ -6,29 +6,23 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
 def admin_main_menu() -> InlineKeyboardMarkup:
+    """Главное меню — только частое (10 кнопок). Остальное в «⚙️ Ещё»."""
     builder = InlineKeyboardBuilder()
     buttons = [
         ("👥 Ученики", "admin:students"),
         ("📅 Расписание", "admin:schedule"),
-        ("📚 Предметы", "admin:subjects"),
         ("📝 Домашние задания", "admin:homework"),
         ("💳 Оплаты", "admin:payments"),
-        ("⭐ Отзывы", "admin:reviews"),
         ("📢 Рассылки", "admin:mailings"),
         ("📊 Аналитика", "admin:analytics"),
-        ("🔔 Уведомления", "admin:notifications"),
-        ("🔕 Режим DND", "admin:dnd"),
-        ("🎯 Реферальная система", "admin:referrals"),
-        ("🧪 A/B тесты", "admin:ab_tests"),
-        ("⚙️ Настройки", "admin:settings"),
         ("🤖 ИИ-ассистент", "admin:ai"),
         ("💎 Подписка", "open_plans"),
+        ("⚙️ Ещё", "admin:more"),
         ("🚪 Выйти", "admin:logout"),
     ]
     for text, callback in buttons:
         builder.button(text=text, callback_data=callback)
-    # группы по 2, служебные — по одной на всю ширину
-    builder.adjust(2, 2, 2, 2, 2, 2, 1, 1, 1, 1)
+    builder.adjust(2, 2, 2, 2, 2)
     return builder.as_markup()
 
 

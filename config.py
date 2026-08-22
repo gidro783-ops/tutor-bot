@@ -89,6 +89,11 @@ class Config:
     # === Напоминание о дедлайне ДЗ (ежедневно, час по местному времени) ===
     HW_REMINDER_HOUR: int = int(os.getenv("HW_REMINDER_HOUR", "11"))
 
+    # Тихие часы ИИ в ЛС: ночью автоответы не отправляются
+    # (одинаковое время = выключено, например 00:00–00:00)
+    AI_DND_START: str = os.getenv("AI_DND_START", "23:00")
+    AI_DND_END: str = os.getenv("AI_DND_END", "08:00")
+
     # === БЕЗОПАСНОСТЬ: ключ шифрования ОБЯЗАТЕЛЬНО задавать в .env ===
     # Генерация: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     _raw_key = os.getenv("ENCRYPTION_KEY", "")

@@ -275,9 +275,33 @@ class Database:
              );
              -- ИСПРАВЛЕНИЕ: защита от двойного бронирования одного слота
              -- (только активные записи; отменённые слоты освобождаются)
-             CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_slot_active
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_slot_active
                  ON bookings(slot_id)
                  WHERE status IN ('pending', 'confirmed');
+            -- Шаблоны быстрых ответов репетитора
+            CREATE TABLE IF NOT EXISTS reply_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                text TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            -- Отложенные сообщения ученикам
+            CREATE TABLE IF NOT EXISTS scheduled_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                send_at TEXT NOT NULL,
+                sent INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            -- Материалы (файлы) по предметам
+            CREATE TABLE IF NOT EXISTS materials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject_id INTEGER,
+                title TEXT NOT NULL,
+                file_id TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
         """)
         await self.db.commit()
     # =================== СТУДЕНТЫ ===================
@@ -1510,4 +1534,131 @@ class Database:
             await self.db.commit()
         except Exception as e:
             logger.error(f"[increment_ab_stat] Failed: {e}")
+
+    # =================== ШАБЛОНЫ БЫСТРЫХ ОТВЕТОВ ===================
+    async def add_template(self, title: str, text: str) -> int:
+        try:
+            cursor = await self.db.execute(
+                "INSERT INTO reply_templates (title, text) VALUES (?, ?)",
+                (title, text)
+            )
+            await self.db.commit()
+            return cursor.lastrowid or 0
+        except Exception as e:
+            logger.error(f"[add_template] Failed: {e}")
+            return 0
+
+    async def get_templates(self) -> list:
+        try:
+            cursor = await self.db.execute(
+                "SELECT * FROM reply_templates ORDER BY id DESC"
+            )
+            return [dict(r) for r in await cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"[get_templates] Failed: {e}")
+            return []
+
+    async def delete_template(self, template_id: int) -> None:
+        try:
+            await self.db.execute(
+                "DELETE FROM reply_templates WHERE id = ?", (template_id,)
+            )
+            await self.db.commit()
+        except Exception as e:
+            logger.error(f"[delete_template] Failed: {e}")
+
+    # =================== ОТЛОЖЕННЫЕ СООБЩЕНИЯ ===================
+    async def schedule_message(self, student_id: int, text: str, send_at: str) -> int:
+        try:
+            cursor = await self.db.execute(
+                "INSERT INTO scheduled_messages (student_id, text, send_at)"
+                " VALUES (?, ?, ?)",
+                (student_id, text, send_at)
+            )
+            await self.db.commit()
+            return cursor.lastrowid or 0
+        except Exception as e:
+            logger.error(f"[schedule_message] Failed: {e}")
+            return 0
+
+    async def get_due_messages(self, now_iso: str) -> list:
+        """Несформированные сообщения, время которых наступило."""
+        try:
+            cursor = await self.db.execute(
+                "SELECT * FROM scheduled_messages WHERE sent = 0 AND send_at <= ?"
+                " ORDER BY send_at LIMIT 20",
+                (now_iso,)
+            )
+            return [dict(r) for r in await cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"[get_due_messages] Failed: {e}")
+            return []
+
+    async def get_pending_scheduled(self) -> list:
+        try:
+            cursor = await self.db.execute(
+                "SELECT sm.*, st.full_name FROM scheduled_messages sm"
+                " LEFT JOIN students st ON sm.student_id = st.user_id"
+                " WHERE sm.sent = 0 ORDER BY sm.send_at"
+            )
+            return [dict(r) for r in await cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"[get_pending_scheduled] Failed: {e}")
+            return []
+
+    async def mark_message_sent(self, message_id: int) -> None:
+        try:
+            await self.db.execute(
+                "UPDATE scheduled_messages SET sent = 1 WHERE id = ?", (message_id,)
+            )
+            await self.db.commit()
+        except Exception as e:
+            logger.error(f"[mark_message_sent] Failed: {e}")
+
+    async def delete_scheduled(self, message_id: int) -> None:
+        try:
+            await self.db.execute(
+                "DELETE FROM scheduled_messages WHERE id = ? AND sent = 0",
+                (message_id,)
+            )
+            await self.db.commit()
+        except Exception as e:
+            logger.error(f"[delete_scheduled] Failed: {e}")
+
+    # =================== МАТЕРИАЛЫ ===================
+    async def add_material(self, title: str, file_id: str,
+                           subject_id: int = None) -> int:
+        try:
+            cursor = await self.db.execute(
+                "INSERT INTO materials (subject_id, title, file_id) VALUES (?, ?, ?)",
+                (subject_id, title, file_id)
+            )
+            await self.db.commit()
+            return cursor.lastrowid or 0
+        except Exception as e:
+            logger.error(f"[add_material] Failed: {e}")
+            return 0
+
+    async def get_materials(self) -> list:
+        try:
+            cursor = await self.db.execute(
+                "SELECT m.*, s.name AS subject_name FROM materials m"
+                " LEFT JOIN subjects s ON m.subject_id = s.id"
+                " ORDER BY m.id DESC LIMIT 50"
+            )
+            return [dict(r) for r in await cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"[get_materials] Failed: {e}")
+            return []
+
+    async def delete_material(self, material_id: int) -> None:
+        try:
+            await self.db.execute(
+                "DELETE FROM materials WHERE id = ?", (material_id,)
+            )
+            await self.db.commit()
+        except Exception as e:
+            logger.error(f"[delete_material] Failed: {e}")
+
+
 db = Database()

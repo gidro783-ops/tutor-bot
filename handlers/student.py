@@ -234,6 +234,7 @@ async def my_profile(message: Message):
     builder = InlineKeyboardBuilder()
     phone_btn = "📞 Изменить телефон" if student.get("phone") else "📞 Указать телефон"
     builder.button(text=phone_btn, callback_data="profile:phone")
+    builder.button(text="📊 Мой прогресс", callback_data="profile:progress")
     builder.adjust(1)
     await message.answer(text, reply_markup=builder.as_markup())
 
@@ -373,3 +374,82 @@ async def ai_chat_reply(message: Message, state: FSMContext):
     history.append({"role": "assistant", "content": answer})
     await state.update_data(ai_history=history[-6:])
     await message.answer(answer)
+
+
+# =================== МАТЕРИАЛЫ ===================
+@router.message(F.text == "📂 Материалы")
+async def my_materials(message: Message):
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from services.cleanup import say
+
+    items = await db.get_materials()
+    if not items:
+        await say(message, "📂 Материалов пока нет. Репетитор загрузит — появятся здесь.")
+        return
+    builder = InlineKeyboardBuilder()
+    for m in items[:25]:
+        subj = f" · {m['subject_name']}" if m.get("subject_name") else ""
+        builder.button(
+            text=f"📄 {m['title'][:40]}{subj}",
+            callback_data=f"mat:get:{m['id']}",
+        )
+    builder.adjust(1)
+    await message.answer("📂 <b>Материалы</b> — нажми, чтобы скачать:",
+                         reply_markup=builder.as_markup())
+
+
+@router.callback_query(F.data.startswith("mat:get:"))
+async def get_material(callback: CallbackQuery):
+    mat_id = int(callback.data.split(":")[-1])
+    items = {m["id"]: m for m in await db.get_materials()}
+    m = items.get(mat_id)
+    if not m:
+        await callback.answer("Не найдено", show_alert=True)
+        return
+    await callback.answer()
+    try:
+        await callback.message.answer_document(
+            m["file_id"], caption=f"📂 {escape_html(m['title'])}"
+        )
+    except Exception:
+        try:
+            await callback.message.answer_photo(
+                m["file_id"], caption=f"📂 {escape_html(m['title'])}"
+            )
+        except Exception as e:
+            logger.warning("mat get: %s", e)
+            await callback.message.answer("⚠️ Файл временно недоступен.")
+
+
+# =================== ПРОГРЕСС УЧЕНИКА ===================
+@router.callback_query(F.data == "profile:progress")
+async def my_progress(callback: CallbackQuery):
+    uid = callback.from_user.id
+    bookings = await db.get_student_bookings(uid)
+    completed = [b for b in bookings if b["status"] == "completed"]
+    hours = 0
+    for b in completed:
+        try:
+            sh, sm = map(int, (b.get("start_time") or "0:0")[:5].split(":"))
+            eh, em = map(int, (b.get("end_time") or "0:0")[:5].split(":"))
+            hours += max(0, (eh * 60 + em) - (sh * 60 + sm)) / 60
+        except Exception:
+            pass
+    homework = await db.get_student_homework(uid)
+    graded = [h for h in homework if h["status"] == "graded"]
+    marks = []
+    for h in graded:
+        g = str(h.get("grade") or "").strip()
+        if g[:1].isdigit():
+            marks.append(int(g[0]))
+    avg = f"{sum(marks) / len(marks):.1f}" if marks else "—"
+    text = (
+        "📊 <b>Мой прогресс</b>\n\n"
+        f"✅ Занятий пройдено: <b>{len(completed)}</b>\n"
+        f"⏱ Часов занятий: <b>{hours:.0f}</b>\n"
+        f"📝 Домашних заданий: {len(homework)} (сдано: {len([h for h in homework if h['status'] != 'assigned'])})\n"
+        f"⭐ Средняя оценка: <b>{avg}</b>\n\n"
+        "Так держать!"
+    )
+    await callback.answer()
+    await callback.message.answer(text)

@@ -179,3 +179,30 @@ class TestAdChats:
         chats = run(db.get_ad_chats())
         target = next(c for c in chats if c["chat_id"] == -100123)
         assert target["total_leads"] == 1
+
+
+class TestNewFeatures:
+    def test_templates_crud(self, db):
+        tid = run(db.add_template("Напоминание", "Привет, {name}!"))
+        assert tid > 0
+        items = run(db.get_templates())
+        assert any(t["id"] == tid for t in items)
+        run(db.delete_template(tid))
+        assert not any(t["id"] == tid for t in run(db.get_templates()))
+
+    def test_scheduled_messages(self, db):
+        run(db.add_student(100, "Иван"))
+        mid = run(db.schedule_message(100, "Не забудь занятие", "2020-01-01 10:00"))
+        assert mid > 0
+        due = run(db.get_due_messages("2020-01-01 10:00"))
+        assert any(m["id"] == mid for m in due)
+        run(db.mark_message_sent(mid))
+        assert not any(m["id"] == mid for m in run(db.get_due_messages("2099-01-01 00:00")))
+
+    def test_materials(self, db):
+        mid = run(db.add_material("Конспект", "file_id_123"))
+        assert mid > 0
+        items = run(db.get_materials())
+        assert any(m["id"] == mid and m["file_id"] == "file_id_123" for m in items)
+        run(db.delete_material(mid))
+        assert not run(db.get_materials())

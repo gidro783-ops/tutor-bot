@@ -54,3 +54,19 @@ class TestBuildSystemPrompt:
             {ai.KB_SUBJECTS: "Математика"}, faq=[]
         )
         assert "не выдумывай" in prompt.lower() or "ничего не выдумывай" in prompt.lower()
+
+
+class TestCustomPrompt:
+    def test_override_replaces_default(self):
+        prompt = ai.build_system_prompt(
+            {ai.KB_PROMPT: "Ты — Мария. Отвечай коротко и на ты.",
+             ai.KB_SUBJECTS: "Математика — 1000 ₽/час"},
+            faq=[],
+        )
+        assert "Ты — Мария" in prompt
+        assert "Ты — репетитор" not in prompt      # стандартный шаблон не участвует
+        assert "1000 ₽/час" in prompt              # факты приложены
+
+    def test_no_override_keeps_default(self):
+        prompt = ai.build_system_prompt({ai.KB_SUBJECTS: "Физика"}, faq=[])
+        assert "Ты — репетитор" in prompt
