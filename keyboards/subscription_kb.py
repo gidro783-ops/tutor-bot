@@ -3,6 +3,7 @@
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from config import config
 from services.subscription import PLANS, Plan
 
 
@@ -16,8 +17,13 @@ def plans_kb(show_trial: bool = False) -> InlineKeyboardMarkup:
     pro = PLANS[Plan.PRO]
     wl = PLANS[Plan.WHITE_LABEL]
     builder.button(
-        text=f"💎 PRO — {pro.price_rub} ₽/мес", callback_data=f"buy_plan:{Plan.PRO.value}"
+        text=f"💳 PRO — {pro.price_rub} ₽/мес", callback_data=f"buy_plan:{Plan.PRO.value}"
     )
+    if config.PRO_PRICE_STARS > 0:
+        builder.button(
+            text=f"⭐ PRO — {config.PRO_PRICE_STARS} звёзд",
+            callback_data=f"buy_plan_stars:{Plan.PRO.value}",
+        )
     builder.button(
         text=f"👑 White Label — {wl.price_rub} ₽/мес",
         callback_data=f"buy_plan:{Plan.WHITE_LABEL.value}",

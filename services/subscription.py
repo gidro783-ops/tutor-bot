@@ -223,6 +223,34 @@ async def can_add_student(tutor_id: int, current_count: int) -> bool:
     return True if limit is None else current_count < limit
 
 
+def validate_invoice(payload: str, total_amount: int, currency: str) -> tuple[bool, str]:
+    """Проверка инвойса подписки в pre_checkout (до списания денег).
+
+    Возвращает (ok, сообщение_об_ошибке). Поддерживает RUB (карта,
+    суммы в копейках) и XTR (Telegram Stars, сумма — целые звёзды).
+    """
+    if not payload.startswith("sub:"):
+        return False, "Неизвестный идентификатор платежа."
+    plan_code = payload.split(":", 1)[1]
+    if plan_code not in {p.value for p in Plan}:
+        return False, "Выбран неизвестный тариф."
+    if plan_code == Plan.FREE.value:
+        return False, "Бесплатный тариф не требует оплаты."
+    plan = Plan(plan_code)
+    if currency == "XTR":
+        expected = config.PRO_PRICE_STARS
+        if plan != Plan.PRO or expected <= 0:
+            return False, "Оплата звёздами для этого тарифа недоступна."
+        if total_amount != expected:
+            return False, "Сумма в звёздах не совпадает с тарифом."
+        return True, ""
+    # всё остальное считаем рублёвой оплатой (суммы в копейках)
+    expected = PLANS[plan].price_rub * 100
+    if total_amount != expected:
+        return False, "Сумма платежа не совпадает с тарифом."
+    return True, ""
+
+
 async def feature_enabled(tutor_id: int, feature: str) -> bool:
     sub = await get_subscription(tutor_id)
     return bool(getattr(sub.effective_info, feature, False))

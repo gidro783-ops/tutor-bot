@@ -62,8 +62,14 @@ class Config:
     # Токен платёжного провайдера для оплаты подписки PRO (990 ₽/мес).
     # Получается у @BotFather: /mybots → Payments → подключить провайдера
     # (ЮKassa / Сбер / TELEGRAM —Stars и т.п.) и скопировать токен.
-    # Пусто — оплата по кнопке недоступна (бот сообщит, что не настроено).
+    # Пусто — оплата картой недоступна (остаётся оплата звёздами, см. ниже).
     PAYMENT_PROVIDER_TOKEN: str = os.getenv("PAYMENT_PROVIDER_TOKEN", "")
+
+    # Цена PRO в Telegram Stars (⭐). Звёзды работают БЕЗ платёжного
+    # провайдера — оплата доступна сразу. Курс звезды плавает, подберите
+    # значение под себя (вывод звёзд — через fragment.com).
+    # 0 = отключить оплату звёздами.
+    PRO_PRICE_STARS: int = int(os.getenv("PRO_PRICE_STARS", "800"))
 
     # === БЕЗОПАСНОСТЬ: ключ шифрования ОБЯЗАТЕЛЬНО задавать в .env ===
     # Генерация: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

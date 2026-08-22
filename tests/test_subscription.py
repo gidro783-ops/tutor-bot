@@ -56,6 +56,35 @@ class TestTrial:
         assert run(sub.start_trial(OWNER)) is None
 
 
+class TestInvoiceValidation:
+    """validate_invoice — проверка счёта до списания денег."""
+
+    def test_rub_ok(self):
+        ok, err = sub.validate_invoice("sub:pro", 990 * 100, "RUB")
+        assert ok and err == ""
+
+    def test_rub_wrong_amount(self):
+        ok, _ = sub.validate_invoice("sub:pro", 100, "RUB")
+        assert not ok
+
+    def test_stars_ok(self):
+        ok, err = sub.validate_invoice("sub:pro", sub.config.PRO_PRICE_STARS, "XTR")
+        assert ok and err == ""
+
+    def test_stars_wrong_amount(self):
+        ok, _ = sub.validate_invoice("sub:pro", 1, "XTR")
+        assert not ok
+
+    def test_free_rejected(self):
+        ok, _ = sub.validate_invoice("sub:free", 0, "RUB")
+        assert not ok
+
+    def test_unknown_payload(self):
+        for payload in ("", "lesson:42", "sub:unknown"):
+            ok, _ = sub.validate_invoice(payload, 100, "RUB")
+            assert not ok
+
+
 class TestQuotas:
     def test_free_mailing_10_per_day(self):
         assert run(sub.mailing_left_today(OWNER)) == 10

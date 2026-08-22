@@ -71,12 +71,19 @@ async def on_start_trial(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("buy_plan:"))
 async def buy_plan(call: CallbackQuery):
+    """Оплата картой (нужен PAYMENT_PROVIDER_TOKEN от @BotFather)."""
     plan = Plan(call.data.split(":", 1)[1])
     info = PLANS[plan]
     if not config.PAYMENT_PROVIDER_TOKEN:
         await call.message.answer(
-            f"Оплата тарифа {info.title} — {info.price_rub} руб/мес.\n"
-            "Платёжный провайдер не настроен (PAYMENT_PROVIDER_TOKEN в .env)."
+            f"💳 Оплата картой тарифа {info.title} — {info.price_rub} ₽/мес.\n\n"
+            "Платёжный провайдер ещё не подключён. Это делается один раз:\n"
+            "1. Откройте @BotFather → /mybots → ваш бот\n"
+            "2. Payments → подключить провайдера (ЮKassa, Сбер…)\n"
+            "3. Скопируйте токен в .env: PAYMENT_PROVIDER_TOKEN=…\n"
+            "4. Перезапустите бота\n\n"
+            "Подробная инструкция: docs/PAYMENTS.md\n"
+            "А пока PRO можно оплатить звёздами Telegram ⭐",
         )
         await call.answer()
         return
@@ -92,26 +99,36 @@ async def buy_plan(call: CallbackQuery):
     await call.answer()
 
 
+@router.callback_query(F.data.startswith("buy_plan_stars:"))
+async def buy_plan_stars(call: CallbackQuery):
+    """Оплата Telegram Stars — работает без платёжного провайдера."""
+    plan = Plan(call.data.split(":", 1)[1])
+    if config.PRO_PRICE_STARS <= 0:
+        await call.answer("Оплата звёздами отключена", show_alert=True)
+        return
+    await call.message.answer_invoice(
+        title="Подписка PRO (звёзды)",
+        description=f"Доступ к тарифу PRO на 1 месяц — {config.PRO_PRICE_STARS} ⭐",
+        payload=f"sub:{plan.value}",
+        provider_token="",  # для XTR токен не нужен
+        currency="XTR",
+        prices=[LabeledPrice(label="PRO — 1 мес", amount=config.PRO_PRICE_STARS)],
+    )
+    await call.answer()
+
+
 @router.pre_checkout_query()
 async def pre_checkout(query: PreCheckoutQuery):
-    """Валидация заказа ДО списания денег."""
-    payload = query.invoice_payload or ""
-    if not payload.startswith("sub:"):
-        await query.answer(ok=False, error_message="Некорректный идентификатор заказа.")
-        logger.warning("Bad payload in pre_checkout: %r", payload)
-        return
-    plan_code = payload.split(":", 1)[1]
-    if plan_code not in {p.value for p in Plan}:
-        await query.answer(ok=False, error_message="Выбран неизвестный тариф.")
-        logger.warning("Unknown plan in pre_checkout: %r", plan_code)
-        return
-    if plan_code == Plan.FREE.value:
-        await query.answer(ok=False, error_message="Бесплатный тариф не требует оплаты.")
-        return
-    expected = PLANS[Plan(plan_code)].price_rub * 100
-    if query.total_amount != expected:
-        await query.answer(ok=False, error_message="Сумма платежа не совпадает с тарифом.")
-        logger.warning("Amount mismatch: got %s, expected %s", query.total_amount, expected)
+    """Валидация заказа ДО списания денег (карта и звёзды)."""
+    ok, error = sub_service.validate_invoice(
+        query.invoice_payload or "", query.total_amount, query.currency
+    )
+    if not ok:
+        await query.answer(ok=False, error_message=error)
+        logger.warning(
+            "pre_checkout rejected: payload=%r amount=%s currency=%s",
+            query.invoice_payload, query.total_amount, query.currency,
+        )
         return
     await query.answer(ok=True)
 
