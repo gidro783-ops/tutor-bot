@@ -100,6 +100,21 @@ async def userbot_login_start(callback: CallbackQuery, state: FSMContext):
         f"Код подтверждения придёт в Telegram.{phone_hint}",
         reply_markup=builder.as_markup(),
     )
+def _code_prompt_kb():
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📲 Прислать код по SMS", callback_data="ub:login:sms")
+    builder.button(text="❌ Отмена", callback_data="cancel_flow")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+CODE_HINT = (
+    "\n\n⚠️ Вводите код из <b>последнего</b> сообщения Telegram — "
+    "старые коды гаснут моментально."
+)
+
+
 @router.callback_query(F.data == "ub:login:env_phone")
 async def userbot_login_env_phone(callback: CallbackQuery, state: FSMContext):
     if not await check_admin(callback):
@@ -113,7 +128,9 @@ async def userbot_login_env_phone(callback: CallbackQuery, state: FSMContext):
         )
         await state.set_state(UserbotLogin.code)
         await callback.message.edit_text(
-            f"📩 Код отправлен в Telegram на <code>{phone}</code>\n\nВведите код подтверждения:"
+            f"📩 Код отправлен в Telegram на <code>{phone}</code>\n\n"
+            f"Введите код подтверждения:" + CODE_HINT,
+            reply_markup=_code_prompt_kb(),
         )
     else:
         # v3: показываем реальную причину, а не «Ошибка отправки кода»
@@ -151,11 +168,43 @@ async def userbot_login_phone(message: Message, state: FSMContext):
         await state.set_state(UserbotLogin.code)
         await message.answer(
             f"📩 Код отправлен в Telegram на номер {phone}\n\n"
-            f"Введите 5-значный код подтверждения:"
+            f"Введите 5-значный код подтверждения:" + CODE_HINT,
+            reply_markup=_code_prompt_kb(),
         )
     else:
         # v3: реальная причина ошибки + можно попробовать снова
         await message.answer(f"❌ {escape_html(err)}\n\nВведите номер ещё раз:")
+@router.callback_query(F.data == "ub:login:sms")
+async def userbot_login_sms(callback: CallbackQuery, state: FSMContext):
+    """Повторная отправка кода СМС-кой: для +1 и подобных номеров
+    код из приложения часто не совпадает с кодом для API-входа,
+    а SMS-код — всегда рабочий."""
+    if not await check_admin(callback):
+        return
+    data = await state.get_data()
+    phone = data.get("phone") or userbot.phone
+    if not phone:
+        await callback.answer("Сначала запросите код", show_alert=True)
+        return
+    await callback.answer("Запрашиваю код по SMS…")
+    ok, err = await userbot.send_code_request(phone, force_sms=True)
+    if ok:
+        await state.update_data(
+            phone=phone, phone_code_hash=userbot.phone_code_hash
+        )
+        await state.set_state(UserbotLogin.code)
+        await callback.message.answer(
+            f"📲 Код отправлен СМС-кой на <code>{phone}</code>.\n"
+            f"Введите код из СМС (придёт за 1-2 минуты):" + CODE_HINT,
+            reply_markup=_code_prompt_kb(),
+        )
+    else:
+        await callback.message.answer(
+            f"❌ Не удалось отправить СМС:\n{escape_html(err)}\n\n"
+            f"Попробуйте «🔑 Авторизоваться» ещё раз."
+        )
+
+
 @router.message(UserbotLogin.code)
 async def userbot_login_code(message: Message, state: FSMContext):
     if is_cancel(message.text):
@@ -193,6 +242,29 @@ async def userbot_login_code(message: Message, state: FSMContext):
             "🔐 У этого аккаунта включён двухступенчатый пароль.\n\n"
             "Введите пароль Telegram (не код, а тот, что задаётся в "
             "Настройки → Конфиденциальность → Дополнительный пароль):"
+        )
+    elif err == "CODE_EXPIRED":
+        # Telegram прислал несколько кодов / повторный запрос погасил
+        # старый. Не тупик: сами высылаем новый код.
+        if phone:
+            ok2, err2 = await userbot.send_code_request(phone)
+            if ok2:
+                await state.update_data(
+                    phone=phone, phone_code_hash=userbot.phone_code_hash
+                )
+                await state.set_state(UserbotLogin.code)
+                await message.answer(
+                    "⌛ Этот код уже недействителен (обычно Telegram "
+                    "присылал несколько кодов или код запрашивали "
+                    "повторно).\n\n"
+                    f"📩 Я отправил <b>новый код</b> на <code>{phone}</code> — "
+                    f"введите код из ПОСЛЕДНЕГО сообщения:",
+                    reply_markup=_code_prompt_kb(),
+                )
+                return
+        await message.answer(
+            "⌛ Код недействителен. Нажмите «🔑 Авторизоваться» — "
+            "придёт новый код, и введите его сразу."
         )
     else:
         # v3: настоящая причина, а не «Неверный код»

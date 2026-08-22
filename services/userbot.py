@@ -114,13 +114,16 @@ class UserbotService:
                 logger.warning(f"Userbot: не удалось удалить {f}: {e}")
         return True
 
-    async def send_code_request(self, phone: str) -> Tuple[bool, str]:
+    async def send_code_request(self, phone: str, force_sms: bool = False) -> Tuple[bool, str]:
         """Отправляем код. ИСПРАВЛЕНО (v3):
         - возвращает (ok, ошибка) — репетитор видит реальную причину,
           а не просто «Ошибка отправки кода»;
         - если привязан другой аккаунт (другой номер) — автоматически
           сбрасывает старую сессию, иначе Telegram не даст код на
-          новый номер (API думает, что вы уже в другом аккаунте)."""
+          новый номер (API думает, что вы уже в другом аккаунте);
+        - force_sms=True — повторная отправка кода СМС-кой (для +1 и
+          прочих номеров, где код в приложении не совпадает с кодом
+          для входа через API)."""
         phone = normalize_phone(phone)
         if not phone:
             return False, "Не распознан номер. Формат: +79991234567 или +15551234567"
@@ -147,7 +150,7 @@ class UserbotService:
             # getattr(sent, "phone_code_hash", None) и всегда получал None,
             # из-за чего sign_in уходил без хэша и Telegram отклонял даже
             # верный код. Поддерживаем и старый формат (объект SentCode).
-            sent = await self.client.send_code_request(phone)
+            sent = await self.client.send_code_request(phone, force_sms=force_sms)
             if isinstance(sent, str):
                 self.phone_code_hash = sent or None
             else:
@@ -217,10 +220,9 @@ class UserbotService:
                 "Введите код ещё раз:"
             )
         except PhoneCodeExpiredError:
-            return False, (
-                "⌛ Код истёк (живёт ~5 минут).\n"
-                "Нажмите «🔑 Авторизоваться» ещё раз — придёт новый код."
-            )
+            # Маркер для хендлера: он сам вышлет новый код и попросит
+            # ввести код из ПОСЛЕДНЕГО сообщения Telegram.
+            return False, "CODE_EXPIRED"
         except FloodWaitError as e:
             return False, f"Слишком много попыток — подождите {e.seconds} с."
         except Exception as e:
