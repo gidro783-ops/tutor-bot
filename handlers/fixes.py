@@ -50,7 +50,7 @@ async def _set_flow(state: FSMContext, flow: str, step: str, **kw):
 def _cancel_kb():
     """Кнопка «❌ Отмена» для любого шага ввода."""
     b = InlineKeyboardBuilder()
-    b.button(text="❌ Отмена", callback_data="cancel")
+    b.button(text="◀️ Назад (отменить ввод)", callback_data="cancel")
     return b.as_markup()
 
 def _cancel_line(text: str) -> str:
@@ -461,9 +461,9 @@ async def step_input(message: Message, state: FSMContext):
     #    (событие передаётся дальше следующим обработчикам).
     CANCEL_WORDS = {"❌ отмена", "отмена", "отменить", "cancel"}
     MENU_BUTTONS = {
-        "📅 записаться на занятие", "📋 мои занятия", "📝 домашние задания",
-        "💳 оплата", "❓ faq", "🎁 пригласить друга", "👤 мой профиль",
-        "📞 связаться с репетитором",
+        "📅 записаться", "📋 мои занятия", "📝 домашние задания",
+        "💳 оплата", "❓ faq", "🎁 пригласить друга",
+        "📞 связаться с репетитором", "🤖 спросить ии", "👤 профиль",
     }
     if low in CANCEL_WORDS or v == "/cancel":
         await state.clear()

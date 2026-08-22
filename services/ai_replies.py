@@ -30,10 +30,11 @@ SKIP_LIST_KEY = "ai_skip_list"
 COOLDOWN_SEC = 60          # пауза между автоответами одному человеку
 MANUAL_PAUSE_SEC = 24 * 3600  # молчание после ручного ответа репетитора
 
-# runtime-состояние (в памяти; перезапуск бота сбрасывает паузы)
+# runtime-состояние (в памяти; перезапуск бота сбрасывает паузы и память)
 _attached = False
 _last_auto: dict[int, float] = {}     # chat_id → время последнего автоответа
 _manual_at: dict[int, float] = {}     # chat_id → время последнего ручного ответа
+_history: dict[int, list] = {}        # chat_id → последние сообщения диалога
 
 
 # =================== ИСКЛЮЧЕНИЯ (@username / ID) ===================
@@ -150,6 +151,8 @@ async def _on_outgoing(event):
         if last is not None and time.time() - last < 10:
             return  # это наш автоответ, не трогаем
         _manual_at[chat_id] = time.time()
+        # репетитор вступил в разговор сам — следующая ветка ИИ начнётся заново
+        _history.pop(chat_id, None)
     except Exception as e:
         logger.warning("ai_replies outgoing: %s", e)
 
@@ -202,9 +205,17 @@ async def _on_incoming(event):
                 logger.info("AI reply skipped: free quota exhausted")
             return
 
-        answer = await ai_assistant.answer_question(event.message.message or "")
+        answer = await ai_assistant.answer_question(
+            event.message.message or "", history=_history.get(chat_id, [])
+        )
         await event.reply(answer)
         _last_auto[chat_id] = time.time()
+        # помним разговор — ИИ не здоровается заново и держит контекст
+        hist = _history.setdefault(chat_id, [])
+        hist.append({"role": "user", "content": event.message.message or ""})
+        hist.append({"role": "assistant", "content": answer})
+        if len(hist) > 8:
+            del hist[:-8]
         if owner is not None:
             await sub_service.consume_ai_answer(owner)
         logger.info("AI auto-reply sent to %s", chat_id)

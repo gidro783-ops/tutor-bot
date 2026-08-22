@@ -6,4 +6,4 @@ bcrypt>=4.1.0
 python-dotenv>=1.0.1
 phonenumbers>=8.13.0
 APScheduler>=3.10,<4
-telethon>=1.36
+telethon>=1.40

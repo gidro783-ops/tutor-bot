@@ -27,7 +27,8 @@ def admin_main_menu() -> InlineKeyboardMarkup:
     ]
     for text, callback in buttons:
         builder.button(text=text, callback_data=callback)
-    builder.adjust(2)
+    # группы по 2, служебные — по одной на всю ширину
+    builder.adjust(2, 2, 2, 2, 2, 2, 1, 1, 1, 1)
     return builder.as_markup()
 
 

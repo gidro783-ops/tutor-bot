@@ -12,6 +12,12 @@
 import sys, os, asyncio, sqlite3, tempfile, types
 from datetime import datetime, timedelta
 
+# Windows-консоль (cp1251) не умеет печатать ✓/✅ — переводим stdout
+# в UTF-8, чтобы тест не падал на «символ не отображается»
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # tempfile вместо /tmp — кроссплатформенно (Windows, Linux, macOS)
 TEST_DB = os.path.join(tempfile.gettempdir(), "tbtest_tutor.db")

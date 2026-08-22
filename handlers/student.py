@@ -123,7 +123,7 @@ async def cmd_start(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=student_main_menu())
 
 
-@router.message(F.text == "📅 Записаться на занятие")
+@router.message(F.text == "📅 Записаться")
 async def book_lesson(message: Message, state: FSMContext):
     from handlers.booking import start_booking
     await start_booking(message, state)
@@ -137,7 +137,7 @@ async def my_lessons(message: Message):
     if not bookings:
         await message.answer(
             "📭 У вас пока нет записей.\n\n"
-            "Нажмите «📅 Записаться на занятие», чтобы выбрать время."
+            "Нажмите «📅 Записаться», чтобы выбрать время."
         )
         return
     from keyboards.student_kb import my_bookings_keyboard
@@ -211,7 +211,7 @@ async def referral_info(message: Message):
     )
 
 
-@router.message(F.text == "👤 Мой профиль")
+@router.message(F.text == "👤 Профиль")
 async def my_profile(message: Message):
     student = await db.get_student(message.from_user.id)
     if not student:
@@ -290,7 +290,7 @@ def _ai_exit_kb():
     return builder.as_markup()
 
 
-@router.message(F.text == "🤖 Спросить")
+@router.message(F.text == "🤖 Спросить ИИ")
 async def ai_chat_start(message: Message, state: FSMContext):
     from services import ai_assistant, subscription as sub_service
 

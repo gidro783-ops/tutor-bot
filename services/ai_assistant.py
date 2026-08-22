@@ -22,37 +22,40 @@ logger = logging.getLogger(__name__)
 KB_NAME = "ai_tutor_name"
 KB_SUBJECTS = "ai_subjects"
 KB_ABOUT = "ai_about"
+KB_STYLE = "ai_style"
 KB_ENABLED = "ai_enabled"
 
-SYSTEM_TEMPLATE = """Ты — вежливый ассистент-консультант репетитора{tutor_name_part}.
-Ты отвечаешь ученикам в Telegram-боте ОТ ИМЕНИ репетитора.
+SYSTEM_TEMPLATE = """Ты — репетитор{tutor_name_part}, который переписывается в Telegram.
+Ты не ассистент и не бот — это твой личный аккаунт, тон живого человека.
 
-Правила:
-- Отвечай ТОЛЬКО по информации ниже. Ничего не выдумывай: ни цены, ни
-  расписание, ни обещания.
-- Не называй себя «ИИ», «ботом» или «ассистентом» — ты говоришь от лица
-  репетитора. Если тебя спрашивают «ты бот?» — ответь, что ты помощник
-  репетитора.
-- Отвечай кратко (до 5-7 предложений), дружелюбно, на русском языке.
-- Если вопроса нет в информации ниже — предложи нажать «📞 Связаться
-  с репетитором» или записаться на пробное занятие.
-- Не обсуждай политику, религию и темы, не связанные с занятиями.
-- Не сообщай никаких персональных данных, телефонов и адресов, кроме
-  указанных в информации.
+Как говорить:
+- Пиши как обычный человек в мессенджере: коротко (1-4 предложения),
+  разговорно, без канцелярита.
+- БЕЗ эмодзи и смайликов. Без восклицательных знаков подряд.
+- Не здоровайся при каждом сообщении («Здравствуйте»/«Привет» — только
+  если человек написал впервые и ещё не получил ни одного ответа.
+  В продолжении диалога сразу отвечай по делу, как в реальной переписке.
+- Можно поддержать любую бытовую тему и маленький трёп, но по сути
+  занятий, ценам, расписанию и условиям отвечай ТОЛЬКО по информации
+  ниже — ничего не выдумывай и не обещай.
+- Если нужного факта нет в информации — честно скажи, что уточнишь,
+  и предложи уточнить детали (созвон/запись).
+- Не сообщай телефоны, адреса и личные данные, кроме указанных ниже.
 
 Информация о репетиторе и услугах:
-{knowledge}"""
+{knowledge}{style_part}"""
 
 
 def build_system_prompt(settings: dict, faq: list[dict]) -> str:
-    """Собирает системный промпт из анкеты и FAQ (чистая функция — тестируется).
+    """Собирает системный промпт из анкеты, FAQ и стиля (чистая функция).
 
-    settings: {ai_tutor_name, ai_subjects, ai_about}
+    settings: {ai_tutor_name, ai_subjects, ai_about, ai_style}
     faq: [{"question", "answer"}, ...]
     """
     name = (settings.get(KB_NAME) or "").strip()
     subjects = (settings.get(KB_SUBJECTS) or "").strip()
     about = (settings.get(KB_ABOUT) or "").strip()
+    style = (settings.get(KB_STYLE) or "").strip()
 
     tutor_name_part = f" {name}" if name else ""
     blocks = []
@@ -69,11 +72,14 @@ def build_system_prompt(settings: dict, faq: list[dict]) -> str:
         blocks.append(f"Частые вопросы (FAQ):\n{faq_text}")
     if not blocks:
         blocks.append(
-            "(Анкета пока не заполнена. Отвечай общими фразами и "
-            "перенаправляй на кнопку «📞 Связаться с репетитором».)"
+            "(Анкета пока не заполнена. Общую информацию давай осторожно, "
+            "детали обещай уточнить.)"
         )
+    style_part = f"\n\nОсобый стиль общения (приоритетнее всего):\n{style}" if style else ""
     return SYSTEM_TEMPLATE.format(
-        tutor_name_part=tutor_name_part, knowledge="\n\n".join(blocks)
+        tutor_name_part=tutor_name_part,
+        knowledge="\n\n".join(blocks),
+        style_part=style_part,
     )
 
 
@@ -90,6 +96,7 @@ async def answer_question(question: str, history: list | None = None) -> str:
         KB_NAME: await db.get_setting(KB_NAME, ""),
         KB_SUBJECTS: await db.get_setting(KB_SUBJECTS, ""),
         KB_ABOUT: await db.get_setting(KB_ABOUT, ""),
+        KB_STYLE: await db.get_setting(KB_STYLE, ""),
     }
     try:
         faq = await db.get_all_faq()

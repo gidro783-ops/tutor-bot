@@ -5,19 +5,19 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 def student_main_menu() -> ReplyKeyboardMarkup:
     builder = ReplyKeyboardBuilder()
     buttons = [
-        "📅 Записаться на занятие",
+        "📅 Записаться",
         "📋 Мои занятия",
-        "🤖 Спросить",
+        "🤖 Спросить ИИ",
         "📝 Домашние задания",
         "💳 Оплата",
         "❓ FAQ",
+        "👤 Профиль",
         "🎁 Пригласить друга",
-        "👤 Мой профиль",
         "📞 Связаться с репетитором",
     ]
     for btn in buttons:
         builder.button(text=btn)
-    builder.adjust(2)
+    builder.adjust(2, 2, 2, 2, 1)  # широкая кнопка связи — отдельно
     return builder.as_markup(resize_keyboard=True)
 
 

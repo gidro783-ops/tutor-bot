@@ -43,7 +43,7 @@ def subscription_menu_kb(sub) -> InlineKeyboardMarkup:
 
 
 def cancel_flow_kb() -> InlineKeyboardMarkup:
-    """Универсальная «❌ Отмена» для шагов ввода текста."""
+    """Универсальная кнопка выхода из любого шага ввода текста."""
     builder = InlineKeyboardBuilder()
-    builder.button(text="❌ Отмена", callback_data="cancel_flow")
+    builder.button(text="◀️ Назад (отменить ввод)", callback_data="cancel_flow")
     return builder.as_markup()

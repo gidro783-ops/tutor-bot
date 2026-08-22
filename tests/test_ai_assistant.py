@@ -8,7 +8,7 @@ class TestBuildSystemPrompt:
         prompt = ai.build_system_prompt(
             {
                 ai.KB_NAME: "Мария, репетитор по математике",
-                ai.KB_SUBJECTS: "Математика — 1200 ₽/час\nОГЭ — 1500 ₽/час",
+                ai.KB_SUBJECTS: "Математика — 1200 ₽/час\nОГЭ-подготовка — 1500 ₽/час",
                 ai.KB_ABOUT: "8 лет опыта, онлайн, пробное бесплатно",
             },
             faq=[],
@@ -16,7 +16,25 @@ class TestBuildSystemPrompt:
         assert "Мария" in prompt
         assert "1200 ₽/час" in prompt
         assert "8 лет опыта" in prompt
-        assert "от имени репетитора" in prompt.lower() or "от лица репетитора" in prompt
+
+    def test_human_persona_rules(self):
+        """Живой человек: без смайлов, без приветствий в каждом ответе."""
+        prompt = ai.build_system_prompt({ai.KB_NAME: "Мария"}, faq=[])
+        low = prompt.lower()
+        assert "не ассистент и не бот" in low
+        assert "без эмодзи" in low
+        assert "не здоровайся при каждом" in low
+
+    def test_custom_style_appended_with_priority(self):
+        prompt = ai.build_system_prompt(
+            {ai.KB_STYLE: "Обращайся на ты и шути."}, faq=[]
+        )
+        assert "Обращайся на ты и шути." in prompt
+        assert "приоритетнее всего" in prompt.lower() or "главнее" in prompt.lower()
+
+    def test_no_style_no_extra_block(self):
+        prompt = ai.build_system_prompt({}, faq=[])
+        assert "Особый стиль" not in prompt
 
     def test_includes_faq(self):
         prompt = ai.build_system_prompt(
